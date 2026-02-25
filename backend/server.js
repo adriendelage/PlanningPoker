@@ -7,12 +7,16 @@ const path=require("path");
 const app=express();
 app.use(cors());
 
-// Servir le frontend buildé
-const frontendDist = path.resolve(__dirname, "../frontend/dist");
+// ── Servir le frontend buildé ─────────────────────────────────────────────────
+// Lance d'abord : cd frontend && npm run build
+const frontendDist = path.resolve(__dirname,"../frontend/dist");
 app.use(express.static(frontendDist));
+
+// SPA fallback — toutes les routes inconnues → index.html
 app.get("*",(req,res)=>{
   res.sendFile(path.join(frontendDist,"index.html"));
 });
+// ─────────────────────────────────────────────────────────────────────────────
 
 const server=http.createServer(app);
 const io=new Server(server,{cors:{origin:"*"}});
@@ -27,7 +31,8 @@ function broadcastState(id){
     task: s.tasks[s.index] || "Terminé",
     participants: s.participants,
     revealed: s.revealed,
-    timerSeconds: s.timerSeconds ?? null
+    timerSeconds: s.timerSeconds ?? null,
+    history: s.history || []
   });
 }
 
@@ -56,6 +61,11 @@ function stopTimer(id){
   if(sessions[id]) sessions[id].timerSeconds=null;
 }
 
+const CARDS=[0,1,3,5,8,13,21];
+function closestCard(val){
+  return CARDS.reduce((a,b)=>Math.abs(b-val)<Math.abs(a-val)?b:a);
+}
+
 io.on("connection",socket=>{
 
   socket.on("session:create",(data,cb)=>{
@@ -65,7 +75,8 @@ io.on("connection",socket=>{
       index: 0,
       participants: [],
       revealed: false,
-      timerSeconds: null
+      timerSeconds: null,
+      history: []  // [{task, votes, median}]
     };
     const hostName = data.hostName || "Hôte";
     sessions[id].participants.push({id:socket.id, name:hostName, vote:null});
@@ -96,7 +107,8 @@ io.on("connection",socket=>{
       task: s.tasks[s.index] || "Terminé",
       participants: s.participants,
       revealed: s.revealed,
-      timerSeconds: s.timerSeconds ?? null
+      timerSeconds: s.timerSeconds ?? null,
+      history: s.history || []
     });
   });
 
@@ -111,6 +123,22 @@ io.on("connection",socket=>{
     if(!sessions[id]) return;
     stopTimer(id);
     sessions[id].revealed=true;
+
+    // Snapshot votes for history
+    const s=sessions[id];
+    const votes=s.participants
+      .map(p=>p.vote)
+      .filter(v=>v!=null && v!=="?" && !isNaN(Number(v)))
+      .map(Number)
+      .sort((a,b)=>a-b);
+    const median = votes.length===0 ? null
+      : votes.length%2===0
+        ? closestCard((votes[votes.length/2-1]+votes[votes.length/2])/2)
+        : votes[Math.floor(votes.length/2)];
+    // Only add if not already saved for this task index
+    if(!s.history.find(h=>h.taskIndex===s.index)){
+      s.history.push({ taskIndex:s.index, task:s.tasks[s.index], votes:s.participants.map(p=>({name:p.name,vote:p.vote})), median });
+    }
     broadcastState(id);
   });
 
@@ -123,6 +151,17 @@ io.on("connection",socket=>{
     s.timerSeconds=null;
     s.participants.forEach(p=>p.vote=null);
     broadcastState(id);
+
+    // Session terminée → nettoyage automatique après 1h
+    if(s.index >= s.tasks.length){
+      setTimeout(()=>{
+        if(sessions[id]){
+          stopTimer(id);
+          delete sessions[id];
+          console.log(`🧹 Session ${id} nettoyée`);
+        }
+      }, 24 * 60 * 60 * 1000); // 24 heure
+    }
   });
 
   socket.on("timer:start",({id, seconds})=>{
