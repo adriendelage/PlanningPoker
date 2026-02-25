@@ -8,7 +8,7 @@ const app=express();
 app.use(cors());
 
 // Servir le frontend buildé
-const frontendDist = "D:\\planning-poker-pro-v6\\planning-poker-pro-modified\\frontend\\dist";
+const frontendDist = path.resolve(__dirname, "../frontend/dist");
 app.use(express.static(frontendDist));
 app.get("*",(req,res)=>{
   res.sendFile(path.join(frontendDist,"index.html"));
