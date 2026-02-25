@@ -2,14 +2,23 @@ const express=require("express");
 const http=require("http");
 const {Server}=require("socket.io");
 const cors=require("cors");
+const path=require("path");
 
 const app=express();
 app.use(cors());
+
+// Servir le frontend buildé
+const frontendDist = "D:\\planning-poker-pro-v6\\planning-poker-pro-modified\\frontend\\dist";
+app.use(express.static(frontendDist));
+app.get("*",(req,res)=>{
+  res.sendFile(path.join(frontendDist,"index.html"));
+});
+
 const server=http.createServer(app);
 const io=new Server(server,{cors:{origin:"*"}});
 
 let sessions={};
-let timers={}; // intervalIds par session
+let timers={};
 
 function broadcastState(id){
   const s=sessions[id];
@@ -18,25 +27,23 @@ function broadcastState(id){
     task: s.tasks[s.index] || "Terminé",
     participants: s.participants,
     revealed: s.revealed,
-    timerSeconds: s.timerSeconds ?? null  // valeur courante du timer (null = pas de timer)
+    timerSeconds: s.timerSeconds ?? null
   });
 }
 
 function startTimer(id, seconds){
   const s=sessions[id];
   if(!s) return;
-  // Clear previous timer if any
   if(timers[id]) clearInterval(timers[id]);
   s.timerSeconds = seconds;
   broadcastState(id);
   timers[id]=setInterval(()=>{
-    if(!sessions[id]) { clearInterval(timers[id]); return; }
+    if(!sessions[id]){ clearInterval(timers[id]); return; }
     sessions[id].timerSeconds--;
     broadcastState(id);
     if(sessions[id].timerSeconds<=0){
       clearInterval(timers[id]);
       delete timers[id];
-      // Auto-reveal when timer hits 0
       sessions[id].revealed=true;
       sessions[id].timerSeconds=null;
       broadcastState(id);
@@ -77,22 +84,14 @@ io.on("connection",socket=>{
     broadcastState(id);
   });
 
-  // Called when navigating to /poker/:id — re-register socket in room
-  // For the host: update their socket.id in participants if it changed
   socket.on("poker:state",({id, isHost})=>{
     const s=sessions[id];
     if(!s) return;
     socket.join(id);
-
-    // If host and their old socket ID is no longer connected, update it
     if(isHost){
-      // The host is always participants[0]
       const host=s.participants[0];
-      if(host && host.id!==socket.id){
-        host.id=socket.id;
-      }
+      if(host && host.id!==socket.id) host.id=socket.id;
     }
-
     socket.emit("state",{
       task: s.tasks[s.index] || "Terminé",
       participants: s.participants,
@@ -126,7 +125,6 @@ io.on("connection",socket=>{
     broadcastState(id);
   });
 
-  // Host starts a timer
   socket.on("timer:start",({id, seconds})=>{
     if(!sessions[id]) return;
     startTimer(id, seconds);
@@ -140,9 +138,8 @@ io.on("connection",socket=>{
 
   socket.on("disconnect",()=>{
     for(const id in sessions){
-      // Don't remove host (index 0) on disconnect — they might reconnect
       const idx=sessions[id].participants.findIndex(p=>p.id===socket.id);
-      if(idx>0){ // only remove non-host participants
+      if(idx>0){
         sessions[id].participants.splice(idx,1);
         broadcastState(id);
       }
@@ -151,5 +148,5 @@ io.on("connection",socket=>{
 
 });
 
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, "0.0.0.0", ()=>console.log(`✅ Server running on port ${PORT}`));
+const PORT = process.env.PORT || 5544;
+server.listen(PORT,"0.0.0.0",()=>console.log(`✅ Serveur lancé sur http://localhost:${PORT}`));
