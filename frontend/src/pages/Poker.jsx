@@ -120,13 +120,50 @@ export default function Poker(){
 
   // Écran de fin
   if(state.task==="Terminé"){
+    const history = state.history || [];
     return (
-      <div style={{padding:40,textAlign:"center",color:"#fff",minHeight:"100vh",background:"#0d0d1a",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20}}>
-        <div style={{fontSize:64}}>🎉</div>
+      <div style={{padding:"40px 20px",textAlign:"center",color:"#fff",minHeight:"100vh",background:"#0d0d1a",display:"flex",flexDirection:"column",alignItems:"center",gap:24}}>
+        <div style={{fontSize:56}}>🎉</div>
         <h1 style={{color:"#00f5d4",margin:0}}>Session terminée !</h1>
-        <p style={{color:"#888",fontSize:15}}>Toutes les tâches ont été estimées.</p>
+        <p style={{color:"#888",fontSize:14,margin:0}}>Toutes les tâches ont été estimées.</p>
+
+        {history.length>0 && (
+          <div style={{width:"100%",maxWidth:700,marginTop:8}}>
+            <h2 style={{color:"#fff",fontSize:16,marginBottom:12,textAlign:"left"}}>📋 Récapitulatif des estimations</h2>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:14}}>
+              <thead>
+                <tr>
+                  <th style={{textAlign:"left",padding:"10px 16px",background:"#1a1a2e",color:"#00f5d4",borderRadius:"8px 0 0 0",borderBottom:"2px solid #00f5d433"}}>Tâche</th>
+                  <th style={{textAlign:"center",padding:"10px 16px",background:"#1a1a2e",color:"#00f5d4",borderBottom:"2px solid #00f5d433"}}>Votes</th>
+                  <th style={{textAlign:"center",padding:"10px 16px",background:"#1a1a2e",color:"#00f5d4",borderRadius:"0 8px 0 0",borderBottom:"2px solid #00f5d433"}}>Médiane</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((h,i)=>(
+                  <tr key={i} style={{background:i%2===0?"#111":"#0d0d1a"}}>
+                    <td style={{textAlign:"left",padding:"12px 16px",color:"#ddd",maxWidth:300}}>{h.task}</td>
+                    <td style={{textAlign:"center",padding:"12px 16px",color:"#888",fontSize:12}}>
+                      {h.votes.map((v,j)=>(
+                        <span key={j} style={{display:"inline-block",background:"#1a1a2e",border:"1px solid #333",borderRadius:4,padding:"2px 7px",margin:"1px 2px",color:v.vote!=null?"#ccc":"#444"}}>
+                          {v.name} : <strong style={{color:v.vote!=null?"#00f5d4":"#444"}}>{v.vote!=null?v.vote:"—"}</strong>
+                        </span>
+                      ))}
+                    </td>
+                    <td style={{textAlign:"center",padding:"12px 16px"}}>
+                      {h.median!=null
+                        ? <span style={{display:"inline-block",background:"#00f5d4",color:"#0d0d1a",borderRadius:8,padding:"4px 16px",fontWeight:"bold",fontSize:20}}>{h.median}</span>
+                        : <span style={{color:"#555"}}>—</span>
+                      }
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         <button onClick={()=>window.location.href="/"}
-          style={{marginTop:16,padding:"12px 28px",background:"#00f5d4",border:"none",borderRadius:8,fontWeight:"bold",fontSize:15,cursor:"pointer"}}>
+          style={{marginTop:8,padding:"12px 28px",background:"#00f5d4",border:"none",borderRadius:8,fontWeight:"bold",fontSize:15,cursor:"pointer"}}>
           ← Nouvelle session
         </button>
       </div>
