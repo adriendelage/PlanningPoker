@@ -1,9 +1,12 @@
 import { io } from "socket.io-client";
 
-// En dev : localhost:3001
-// En prod : même hôte que le frontend, port 3001
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || `${window.location.protocol}//${window.location.hostname}:3001`;
+// Priorité :
+// 1. Variable d'env VITE_SERVER_URL (définie sur Netlify pour pointer vers Railway/Render)
+// 2. En dev local : proxy Vite → pas besoin d'URL absolue, on utilise window.location
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || window.location.origin;
 
-const socket = io(SERVER_URL);
+const socket = io(SERVER_URL, {
+  transports: ["websocket", "polling"]
+});
 
 export default socket;
