@@ -118,12 +118,29 @@ export default function Poker(){
 
   if(!state) return <div style={{padding:40,color:"#fff",background:"#0d0d1a",minHeight:"100vh"}}>Chargement...</div>;
 
+  // Écran de fin
+  if(state.task==="Terminé"){
+    return (
+      <div style={{padding:40,textAlign:"center",color:"#fff",minHeight:"100vh",background:"#0d0d1a",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20}}>
+        <div style={{fontSize:64}}>🎉</div>
+        <h1 style={{color:"#00f5d4",margin:0}}>Session terminée !</h1>
+        <p style={{color:"#888",fontSize:15}}>Toutes les tâches ont été estimées.</p>
+        <button onClick={()=>window.location.href="/"}
+          style={{marginTop:16,padding:"12px 28px",background:"#00f5d4",border:"none",borderRadius:8,fontWeight:"bold",fontSize:15,cursor:"pointer"}}>
+          ← Nouvelle session
+        </button>
+      </div>
+    );
+  }
+
   const vote=(v)=>{
     socket.emit("vote",{id,value:v});
     setSelected(v);
   };
   const reveal=()=> socket.emit("reveal",{id});
   const next=()=>{ socket.emit("next",{id}); setSelected(null); };
+
+  const canNext = state.revealed;
 
   const totalVotes=state.participants.filter(p=>p.vote!=null).length;
   const totalParticipants=state.participants.length;
@@ -256,7 +273,8 @@ export default function Poker(){
               🃏 Révéler les cartes
             </button>
             <button onClick={next}
-              style={{padding:"10px 22px",background:"#333",color:"#fff",border:"1px solid #555",borderRadius:8,cursor:"pointer",fontWeight:"bold",fontSize:14}}>
+              disabled={!canNext}
+              style={{padding:"10px 22px",background:canNext?"#333":"#1a1a1a",color:canNext?"#fff":"#444",border:canNext?"1px solid #555":"1px solid #333",borderRadius:8,cursor:canNext?"pointer":"not-allowed",fontWeight:"bold",fontSize:14}}>
               ➡ Tâche suivante
             </button>
           </div>
