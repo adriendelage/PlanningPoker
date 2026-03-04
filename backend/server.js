@@ -51,6 +51,7 @@ function startTimer(id, seconds){
       delete timers[id];
       sessions[id].revealed=true;
       sessions[id].timerSeconds=null;
+      snapshotVotes(id); // ← snapshot pour le récap final
       broadcastState(id);
     }
   },1000);
@@ -64,6 +65,27 @@ function stopTimer(id){
 const CARDS=[0,1,3,5,8,13,21];
 function closestCard(val){
   return CARDS.reduce((a,b)=>Math.abs(b-val)<Math.abs(a-val)?b:a);
+}
+
+function snapshotVotes(id){
+  const s=sessions[id];
+  if(!s) return;
+  if(s.history.find(h=>h.taskIndex===s.index)) return; // déjà snapshoté
+  const votes=s.participants
+    .map(p=>p.vote)
+    .filter(v=>v!=null && v!=="?" && !isNaN(Number(v)))
+    .map(Number)
+    .sort((a,b)=>a-b);
+  const median = votes.length===0 ? null
+    : votes.length%2===0
+      ? closestCard((votes[votes.length/2-1]+votes[votes.length/2])/2)
+      : votes[Math.floor(votes.length/2)];
+  s.history.push({
+    taskIndex: s.index,
+    task: s.tasks[s.index],
+    votes: s.participants.map(p=>({name:p.name, vote:p.vote})),
+    median
+  });
 }
 
 io.on("connection",socket=>{
@@ -123,22 +145,7 @@ io.on("connection",socket=>{
     if(!sessions[id]) return;
     stopTimer(id);
     sessions[id].revealed=true;
-
-    // Snapshot votes for history
-    const s=sessions[id];
-    const votes=s.participants
-      .map(p=>p.vote)
-      .filter(v=>v!=null && v!=="?" && !isNaN(Number(v)))
-      .map(Number)
-      .sort((a,b)=>a-b);
-    const median = votes.length===0 ? null
-      : votes.length%2===0
-        ? closestCard((votes[votes.length/2-1]+votes[votes.length/2])/2)
-        : votes[Math.floor(votes.length/2)];
-    // Only add if not already saved for this task index
-    if(!s.history.find(h=>h.taskIndex===s.index)){
-      s.history.push({ taskIndex:s.index, task:s.tasks[s.index], votes:s.participants.map(p=>({name:p.name,vote:p.vote})), median });
-    }
+    snapshotVotes(id); // snapshot pour le récap final
     broadcastState(id);
   });
 
@@ -160,7 +167,7 @@ io.on("connection",socket=>{
           delete sessions[id];
           console.log(`🧹 Session ${id} nettoyée`);
         }
-      }, 24 * 60 * 60 * 1000); // 24 heure
+      }, 24 * 60 * 60 * 1000); // 24 heures
     }
   });
 
