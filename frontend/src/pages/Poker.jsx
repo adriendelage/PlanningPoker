@@ -205,7 +205,7 @@ export default function Poker(){
   const totalParticipants=state.participants.length;
 
   return (
-    <div style={{padding:"40px 20px",textAlign:"center",color:"#fff",minHeight:"100vh",background:"#0d0d1a",position:"relative"}}>
+    <div style={{padding:"48px 24px",textAlign:"center",color:"#fff",minHeight:"100vh",background:"#0d0d1a",position:"relative"}}>
 
       {/* Timer badge for everyone */}
       <TimerBadge seconds={state.timerSeconds}/>
@@ -213,9 +213,9 @@ export default function Poker(){
       {/* Timer control panel only for host */}
       {isHost && <TimerPanel id={id} timerSeconds={state.timerSeconds}/>}
 
-      <h1 style={{color:"#00f5d4",marginBottom:4,marginTop:0}}>{state.task}</h1>
+      <h1 style={{color:"#00f5d4",marginBottom:6,marginTop:0,fontSize:28}}>{state.task}</h1>
       <p style={{color:"#666",fontSize:13,marginBottom:24}}>
-        {totalVotes}/{totalParticipants} vote{totalParticipants>1?"s":""}
+        {totalVotes} / {totalParticipants} participant{totalParticipants>1?"s":""} ont voté
       </p>
 
       {/* Participants cards */}
@@ -225,7 +225,7 @@ export default function Poker(){
           return (
             <div key={p.id} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
               <div style={{
-                width:90,height:130,
+                width:100,height:145,
                 position:"relative",
                 transformStyle:"preserve-3d",
                 transition:"transform 0.6s cubic-bezier(0.4,0.2,0.2,1)",
@@ -240,7 +240,7 @@ export default function Poker(){
                   border: hasVoted ? "2px solid #00f5d4" : "2px solid #333",
                   borderRadius:12,
                   display:"flex",alignItems:"center",justifyContent:"center",
-                  fontSize:34,
+                  fontSize:38,
                   transition:"border-color 0.3s, background 0.3s"
                 }}>
                   {hasVoted ? "✅" : "🂠"}
@@ -257,13 +257,13 @@ export default function Poker(){
                   flexDirection:"column",
                   gap:4
                 }}>
-                  <span style={{fontSize:40,fontWeight:"bold",color:"#0d0d1a",lineHeight:1}}>
+                  <span style={{fontSize:44,fontWeight:"bold",color:"#0d0d1a",lineHeight:1}}>
                     {hasVoted ? String(p.vote) : "—"}
                   </span>
                 </div>
               </div>
               {/* Name always readable — outside the flipping element */}
-              <span style={{fontSize:13,color:"#bbb",fontWeight:500,maxWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              <span style={{fontSize:14,color:"#bbb",fontWeight:500,maxWidth:100,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                 {p.name}
               </span>
             </div>
@@ -274,7 +274,7 @@ export default function Poker(){
       {/* Voting area */}
       {!state.revealed && (
         <div>
-          <p style={{color:"#666",fontSize:13,marginBottom:12}}>Choisissez votre estimation :</p>
+          <p style={{color:"#666",fontSize:15,marginBottom:16}}>Choisissez votre estimation :</p>
           <div style={{display:"flex",justifyContent:"center",flexWrap:"wrap",gap:12}}>
             {cards.map(c=>{
               const isSel=selected===c;
@@ -282,12 +282,12 @@ export default function Poker(){
                 <div key={c}
                   onClick={()=>vote(c)}
                   style={{
-                    width:70,height:100,
+                    width:80,height:115,
                     background: isSel ? "#00f5d4" : "#111",
                     border: isSel ? "2px solid #00f5d4" : "2px solid #333",
                     borderRadius:10,
                     display:"flex",justifyContent:"center",alignItems:"center",
-                    fontSize: isSel ? 30 : 22,
+                    fontSize: isSel ? 34 : 26,
                     fontWeight: isSel ? "bold" : "normal",
                     color: isSel ? "#0d0d1a" : "#fff",
                     cursor:"pointer",
@@ -302,8 +302,8 @@ export default function Poker(){
             })}
           </div>
           {selected!=null && (
-            <div style={{marginTop:16,fontSize:14,color:"#00f5d4",fontWeight:600}}>
-              ✅ Tu as voté : <strong style={{fontSize:16}}>{selected}</strong>
+            <div style={{marginTop:18,fontSize:16,color:"#00f5d4",fontWeight:600}}>
+              ✅ Tu as voté : <strong style={{fontSize:20}}>{selected}</strong>
             </div>
           )}
         </div>
@@ -322,7 +322,7 @@ export default function Poker(){
             <button onClick={reveal}
               disabled={state.revealed}
               style={{
-                padding:"10px 22px",
+                padding:"13px 26px",
                 background:state.revealed?"#2a2a2a":"#e040fb",
                 color:state.revealed?"#666":"#fff",
                 border:"none",borderRadius:8,
@@ -333,7 +333,7 @@ export default function Poker(){
             </button>
             <button onClick={next}
               disabled={!canNext}
-              style={{padding:"10px 22px",background:canNext?"#333":"#1a1a1a",color:canNext?"#fff":"#444",border:canNext?"1px solid #555":"1px solid #333",borderRadius:8,cursor:canNext?"pointer":"not-allowed",fontWeight:"bold",fontSize:14}}>
+              style={{padding:"13px 26px",background:canNext?"#333":"#1a1a1a",color:canNext?"#fff":"#444",border:canNext?"1px solid #555":"1px solid #333",borderRadius:8,cursor:canNext?"pointer":"not-allowed",fontWeight:"bold",fontSize:15}}>
               ➡ Tâche suivante
             </button>
           </div>

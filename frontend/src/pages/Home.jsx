@@ -17,50 +17,78 @@ export default function Home(){
 
   const inputStyle={
     width:"100%",
-    padding:10,
+    padding:"14px 16px",
     marginBottom:20,
     background:"#1a1a2e",
     border:"1px solid #444",
-    borderRadius:8,
+    borderRadius:10,
     color:"#fff",
-    fontSize:15,
-    boxSizing:"border-box"
+    fontSize:16,
+    outline:"none",
+    transition:"border-color 0.2s",
+  };
+
+  const labelStyle={
+    display:"block",
+    fontSize:14,
+    color:"#aaa",
+    marginBottom:6,
+    fontWeight:500,
+    letterSpacing:"0.3px"
   };
 
   return (
-    <div style={{padding:40,maxWidth:600,margin:"auto",color:"#fff",minHeight:"100vh",background:"#0d0d1a"}}>
-      <h1>🃏 Planning Poker</h1>
+    <div style={{minHeight:"100vh",background:"#0d0d1a",display:"flex",alignItems:"center",justifyContent:"center",padding:"24px 16px"}}>
+      <div style={{width:"100%",maxWidth:540,color:"#fff"}}>
 
-      <label style={{fontSize:13,color:"#aaa"}}>Ton nom (hôte)</label>
-      <input placeholder="Ex: Alice" value={hostName}
-        onChange={e=>setHostName(e.target.value)}
-        style={inputStyle}/>
+        <div style={{textAlign:"center",marginBottom:36}}>
+          <div style={{fontSize:52,marginBottom:8}}>🃏</div>
+          <h1 style={{margin:0,fontSize:32,fontWeight:700,color:"#00f5d4"}}>Planning Poker</h1>
+          <p style={{margin:"8px 0 0",color:"#555",fontSize:15}}>Créer une nouvelle session</p>
+        </div>
 
-      <label style={{fontSize:13,color:"#aaa"}}>Nom de la session</label>
-      <input placeholder="Ex: Sprint 42" value={sessionName}
-        onChange={e=>setSessionName(e.target.value)}
-        style={inputStyle}/>
+        <div style={{background:"#111",borderRadius:16,padding:"28px 24px",border:"1px solid #222"}}>
 
-      <h3>Tâches</h3>
-      {tasks.map((t,i)=>(
-        <input key={i} value={t}
-          placeholder={"Tâche "+(i+1)}
-          onChange={e=>{
-            const copy=[...tasks]; copy[i]=e.target.value; setTasks(copy);
-          }}
-          style={{...inputStyle,marginBottom:10}}/>
-      ))}
+          <label style={labelStyle}>Ton nom (hôte)</label>
+          <input placeholder="Ex: Alice" value={hostName}
+            onChange={e=>setHostName(e.target.value)}
+            style={inputStyle}/>
 
-      <div style={{display:"flex",gap:10,marginTop:10}}>
-        <button onClick={()=>setTasks([...tasks,""])}
-          style={{padding:"8px 16px",background:"#333",color:"#fff",border:"1px solid #555",borderRadius:8,cursor:"pointer"}}>
-          + Ajouter une tâche
-        </button>
-        <button onClick={create}
-          style={{padding:"8px 16px",background:"#00f5d4",border:"none",borderRadius:8,fontWeight:"bold",cursor:"pointer"}}>
-          Créer la session
-        </button>
+          <label style={labelStyle}>Nom de la session</label>
+          <input placeholder="Ex: Sprint 42" value={sessionName}
+            onChange={e=>setSessionName(e.target.value)}
+            style={inputStyle}/>
+
+          <label style={{...labelStyle,marginTop:4}}>Tâches à estimer</label>
+          {tasks.map((t,i)=>(
+            <div key={i} style={{display:"flex",gap:8,marginBottom:10}}>
+              <input value={t}
+                placeholder={"Tâche "+(i+1)}
+                onChange={e=>{
+                  const copy=[...tasks]; copy[i]=e.target.value; setTasks(copy);
+                }}
+                style={{...inputStyle,marginBottom:0,flex:1}}/>
+              {tasks.length>1 && (
+                <button onClick={()=>setTasks(tasks.filter((_,j)=>j!==i))}
+                  style={{padding:"0 14px",background:"#1a1a2e",border:"1px solid #333",borderRadius:10,color:"#666",cursor:"pointer",fontSize:18,flexShrink:0}}>
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+
+          <button onClick={()=>setTasks([...tasks,""])}
+            style={{width:"100%",padding:"12px",background:"transparent",color:"#555",border:"1px dashed #333",borderRadius:10,cursor:"pointer",fontSize:15,marginBottom:20,marginTop:4}}>
+            + Ajouter une tâche
+          </button>
+
+          <button onClick={create}
+            style={{width:"100%",padding:"16px",background:"#00f5d4",border:"none",borderRadius:10,fontWeight:"bold",cursor:"pointer",fontSize:17,color:"#0d0d1a",letterSpacing:"0.3px"}}>
+            Créer la session →
+          </button>
+
+        </div>
       </div>
     </div>
-  )
+  );
 }

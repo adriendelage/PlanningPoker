@@ -1,15 +1,22 @@
-
 <!DOCTYPE html>
 <html>
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Planning Poker Pro</title>
     <style>
+      *, *::before, *::after { box-sizing: border-box; }
       body {
-        margin:0;
-        font-family: system-ui;
+        margin: 0;
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 16px;
         background: radial-gradient(circle at top, #1e1e2f, #0f0f17);
-        color:white;
+        color: white;
+        -webkit-text-size-adjust: 100%;
+      }
+      input, button, select {
+        font-family: inherit;
+        font-size: 16px;
       }
     </style>
   </head>
