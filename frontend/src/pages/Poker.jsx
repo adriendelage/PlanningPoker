@@ -4,6 +4,28 @@ import socket from "../socket";
 
 const cards=[0,1,3,5,8,13,21,"?"];
 
+// ─── QR Code component ────────────────────────────────────────────────────────
+function QRCode({ url }){
+  const [show, setShow] = useState(false);
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&bgcolor=0d0d1a&color=00f5d4&data=${encodeURIComponent(url)}`;
+  return (
+    <div style={{marginTop:10}}>
+      <button onClick={()=>setShow(s=>!s)}
+        style={{background:"none",border:"1px solid #333",borderRadius:6,color:"#555",fontSize:12,padding:"4px 10px",cursor:"pointer"}}>
+        {show ? "▲ Masquer le QR code" : "▼ Afficher le QR code"}
+      </button>
+      {show && (
+        <div style={{marginTop:10,display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
+          <img src={qrUrl} alt="QR Code invitation"
+            style={{borderRadius:12,border:"2px solid #00f5d422",width:180,height:180}}/>
+          <span style={{fontSize:11,color:"#444"}}>Scanner pour rejoindre</span>
+        </div>
+      )}
+    </div>
+  );
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ─── Timer display (top-right, visible to all) ────────────────────────────────
 function TimerBadge({ seconds }){
   if(seconds==null) return null;
@@ -315,11 +337,14 @@ export default function Poker(){
               ➡ Tâche suivante
             </button>
           </div>
-          <div style={{marginTop:6,fontSize:12,color:"#555"}}>
-            Lien d'invitation :
-            <span style={{color:"#00f5d4",marginLeft:8,userSelect:"all"}}>
-              {window.location.origin+"/join/"+id}
-            </span>
+          <div style={{marginTop:6,fontSize:12,color:"#555",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+            <div>
+              Lien d'invitation :
+              <span style={{color:"#00f5d4",marginLeft:8,userSelect:"all"}}>
+                {window.location.origin+"/join/"+id}
+              </span>
+            </div>
+            <QRCode url={window.location.origin+"/join/"+id}/>
           </div>
         </div>
       )}
