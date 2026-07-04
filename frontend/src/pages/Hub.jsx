@@ -43,22 +43,46 @@ const TOOLS = [
     path: "/kanban",
     active: true,
   },
+  {
+    id: "velocity",
+    icon: "📈",
+    suit: "▲",
+    name: "Suivi de vélocité",
+    desc: "Points engagés vs livrés, sprint après sprint — pour affiner tes prévisions de capacité.",
+    accent: "#00bbf9",
+    path: "/velocity",
+    active: true,
+  },
+  {
+    id: "okr",
+    icon: "🎯",
+    suit: "◎",
+    name: "OKR léger",
+    desc: "Objectifs et résultats clés, avec une progression mise à jour en équipe au fil du cycle.",
+    accent: "#ff9f1c",
+    path: "/okr",
+    active: true,
+  },
 ];
 
 // Où renvoyer l'utilisateur selon l'outil et son rôle lors de sa dernière visite.
-// Kanban n'a pas d'étape « rejoindre » : on rouvre toujours le tableau directement.
+// Kanban, Vélocité et OKR n'ont pas d'étape « rejoindre » : on rouvre
+// toujours le tableau directement, quel que soit le rôle.
+const PERMANENT_TOOLS = ["kanban", "velocity", "okr"];
 function resolveLink(entry) {
   const { id, tool, role } = entry;
-  if (tool === "kanban") return `/kanban/${id}`;
+  if (PERMANENT_TOOLS.includes(tool)) return `/${tool}/${id}`;
   if (role === "host") return `/${tool}/${id}?host=true`;
   return `/${tool}/join/${id}`;
 }
 
 const TOOL_META = {
-  poker:  { icon: "🃏", accent: "#00f5d4" },
-  retro:  { icon: "🔄", accent: "#f15bb5" },
-  daily:  { icon: "⏱️", accent: "#fee440" },
-  kanban: { icon: "📋", accent: "#9b5de5" },
+  poker:    { icon: "🃏", accent: "#00f5d4" },
+  retro:    { icon: "🔄", accent: "#f15bb5" },
+  daily:    { icon: "⏱️", accent: "#fee440" },
+  kanban:   { icon: "📋", accent: "#9b5de5" },
+  velocity: { icon: "📈", accent: "#00bbf9" },
+  okr:      { icon: "🎯", accent: "#ff9f1c" },
 };
 
 function fmtDate(ts) {

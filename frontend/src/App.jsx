@@ -11,6 +11,10 @@ import DailyInvite from "./pages/DailyInvite.jsx";
 import Daily from "./pages/Daily.jsx";
 import KanbanHome from "./pages/KanbanHome.jsx";
 import Kanban from "./pages/Kanban.jsx";
+import VelocityHome from "./pages/VelocityHome.jsx";
+import Velocity from "./pages/Velocity.jsx";
+import OkrHome from "./pages/OkrHome.jsx";
+import Okr from "./pages/Okr.jsx";
 
 export default function App(){
   return (
@@ -36,6 +40,14 @@ export default function App(){
       {/* Kanban */}
       <Route path="/kanban" element={<KanbanHome/>}/>
       <Route path="/kanban/:id" element={<Kanban/>}/>
+
+      {/* Suivi de vélocité */}
+      <Route path="/velocity" element={<VelocityHome/>}/>
+      <Route path="/velocity/:id" element={<Velocity/>}/>
+
+      {/* OKR léger */}
+      <Route path="/okr" element={<OkrHome/>}/>
+      <Route path="/okr/:id" element={<Okr/>}/>
     </Routes>
   )
 }

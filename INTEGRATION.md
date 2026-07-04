@@ -1,15 +1,16 @@
 # 🧰 Agile Toolbox — Guide d'intégration
 
 Extension de Planning Poker Pro en boîte à outils complète : hub d'accueil,
-persistance PostgreSQL, et 3 nouveaux outils — **Rétrospective**,
-**Daily Timer** et **Kanban léger**.
+persistance PostgreSQL, historique privé (local au navigateur), et 5 nouveaux
+outils — **Rétrospective**, **Daily Timer**, **Kanban léger**,
+**Suivi de vélocité** et **OKR léger**.
 
 ## Fichiers à intégrer dans ton repo
 
 | Fichier | Action | Rôle |
 |---|---|---|
 | `backend/db.js` | **Nouveau** | Module PostgreSQL (pool `pg`, schéma auto-créé, dégradation gracieuse sans DB) |
-| `backend/server.js` | **Remplace** | Serveur + persistance + événements Rétro/Daily/Kanban — **aucun endpoint public de liste** |
+| `backend/server.js` | **Remplace** | Serveur + persistance + événements Rétro/Daily/Kanban/Vélocité/OKR — **aucun endpoint public de liste** |
 | `backend/package.json` | **Remplace** | Ajout de la dépendance `pg` |
 | `backend/package-lock.json` | **Remplace** | Synchronisé avec `pg` (nécessaire pour `npm ci`) |
 | `frontend/src/localHistory.js` | **Nouveau** | Historique **local au navigateur** (remplace l'ancien `api.js`, supprimé) |
@@ -24,6 +25,10 @@ persistance PostgreSQL, et 3 nouveaux outils — **Rétrospective**,
 | `frontend/src/pages/Daily.jsx` | **Nouveau** | Lobby → rotation chronométrée → bilan des temps |
 | `frontend/src/pages/KanbanHome.jsx` | **Remplace** | idem, pour le Kanban |
 | `frontend/src/pages/Kanban.jsx` | **Remplace** | Tableau partagé permanent + trace la visite localement |
+| `frontend/src/pages/VelocityHome.jsx` | **Nouveau** | Création d'un tableau de vélocité |
+| `frontend/src/pages/Velocity.jsx` | **Nouveau** | Graphique engagé/livré (SVG fait main) + stats + historique des sprints |
+| `frontend/src/pages/OkrHome.jsx` | **Nouveau** | Création d'un cycle OKR |
+| `frontend/src/pages/Okr.jsx` | **Nouveau** | Objectifs + résultats clés, progression mise à jour en direct |
 
 ⚠️ **`frontend/src/api.js` doit être supprimé de ton repo** — il n'est plus
 utilisé par rien (le hub ne fait plus aucun appel réseau pour son historique).
@@ -123,6 +128,42 @@ redémarrage — c'est attendu, l'outil n'a de sens qu'avec une base.
 Aucune modification dans `Poker.jsx`, `Invite.jsx`, `socket.js` — les liens
 d'invitation existants (`/join/:id`, `/poker/:id`) restent valides.
 
+## L'outil Suivi de vélocité
+
+Même famille que le Kanban : outil **permanent**, la base est la source de
+vérité, pas de session à rejoindre. On crée un tableau par équipe/projet,
+et on ajoute un sprint (nom, points engagés, points livrés) à chaque fin
+d'itération. Le graphique en barres est du SVG fait main — aucune librairie
+de charting ajoutée, pour rester cohérent avec le reste du projet (aucun
+autre outil n'a de dépendance de rendu).
+
+Stats calculées côté client à partir des données reçues en temps réel :
+vélocité moyenne sur les 3 derniers sprints, total livré, et un indicateur
+de « fiabilité d'engagement » (livré ÷ engagé, en %) qui aide à calibrer
+les engagements de sprint suivants.
+
+Événements : `velocity:create`, `velocity:open`, `velocity:sprint:add`
+(valeurs bornées 0-9999 côté serveur), `velocity:sprint:delete`. Vérifié
+par test comme le Kanban : un tableau créé puis **redémarrage complet du
+serveur** → les sprints se rechargent à l'identique.
+
+## L'outil OKR léger
+
+Toujours le même modèle permanent. Un cycle (ex: "Q3 2026") contient des
+**objectifs**, chacun avec une liste de **résultats clés** notés de 0 à
+100 %. La progression de chaque résultat clé se pilote avec des boutons
++10/−10 plutôt qu'un slider brut — un slider glissé enverrait un événement
+Socket.IO (et une écriture en base) à chaque pixel de déplacement, ce qui
+aurait spammé la synchronisation temps réel entre participants.
+
+La progression d'un objectif est la moyenne de ses résultats clés, et la
+progression globale du cycle est affichée en haut du tableau.
+
+Événements : `okr:create`, `okr:open`, `okr:objective:add`,
+`okr:objective:delete`, `okr:kr:add`, `okr:kr:update` (progression bornée
+0-100 côté serveur), `okr:kr:delete`. Reprise après redémarrage vérifiée
+comme pour le Kanban et la Vélocité.
+
 ## Base de données sur Railway
 
 1. Dans ton projet Railway : **+ New → Database → PostgreSQL**
@@ -134,34 +175,40 @@ d'invitation existants (`/join/:id`, `/poker/:id`) restent valides.
    au premier démarrage — pas de migration manuelle.
 
 **Sans `DATABASE_URL`** (dev local par exemple), le serveur démarre normalement
-en mode mémoire, comme avant. L'API renvoie alors `[]` et la section
-« Sessions récentes » du hub ne s'affiche simplement pas.
+en mode mémoire, comme avant. Les outils éphémères (Poker, Rétro, Daily)
+fonctionnent normalement mais sans persistance ; les outils permanents
+(Kanban, Vélocité, OKR) répondent `*:notfound` à la réouverture d'un lien
+existant, puisqu'ils dépendent entièrement de la base pour se recharger.
 
-## API REST ajoutée
+## API REST
 
 ```
-GET /api/health           → { ok: true, db: true|false }
-GET /api/sessions?limit=N → sessions récentes (nom, hôte, nb tâches, statut)
-GET /api/sessions/:id     → détail + résultats des votes (tâche, médiane, votes nominatifs)
+GET /api/health → { ok: true, db: true|false }
 ```
 
-Les routes API sont déclarées **avant** le fallback SPA (`app.get("*")`),
-sinon elles renverraient `index.html`.
+C'est le seul endpoint HTTP exposé — voir la section confidentialité
+ci-dessus pour le pourquoi. Toutes les autres interactions passent par
+Socket.IO.
 
 ## Schéma
 
 ```sql
-sessions      (id, name, host_name, tool, task_count, created_at, finished_at)
-poker_results (id, session_id → sessions, task_index, task, median, votes JSONB,
-               UNIQUE(session_id, task_index))
-retro_notes   (id, session_id → sessions, column_name, content, votes)
-daily_times   (id, session_id → sessions, name, seconds_used)
-kanban_cards  (id, session_id → sessions, column_name, title, created_at)
+sessions        (id, name, host_name, tool, task_count, created_at, finished_at)
+poker_results   (id, session_id → sessions, task_index, task, median, votes JSONB,
+                 UNIQUE(session_id, task_index))
+retro_notes     (id, session_id → sessions, column_name, content, votes)
+daily_times     (id, session_id → sessions, name, seconds_used)
+kanban_cards    (id, session_id → sessions, column_name, title, created_at)
+velocity_sprints(id, session_id → sessions, sprint_name, committed, completed, created_at)
+okr_objectives  (id, session_id → sessions, title, position, created_at)
+okr_key_results (id, objective_id → okr_objectives, title, progress, position, created_at)
 ```
 
 Une seule table `sessions` pour tout le hub (`tool` = `poker` / `retro` /
-`daily` / `kanban`), avec une table de résultats par outil.
-`GET /api/sessions/:id` renvoie `results` dans le format propre à l'outil.
+`daily` / `kanban` / `velocity` / `okr`), avec une ou deux tables de
+résultats par outil. Ces données ne sont plus exposées via HTTP (voir
+plus haut), mais `db.getSession(id)` reste disponible côté serveur pour
+un futur usage interne (export, admin).
 
 ## Dev local
 
@@ -189,18 +236,26 @@ ajoute dans `vite.config.js` (section `server.proxy`) :
 
 ## Pistes pour la suite
 
-Les 4 outils du hub sont maintenant tous fonctionnels. Pistes pour aller
+Les 6 outils du hub sont maintenant tous fonctionnels. Pistes pour aller
 plus loin :
 
+- **Vélocité ↔ Poker** : aujourd'hui les deux outils sont indépendants ;
+  relier automatiquement les points estimés en Poker à un sprint de
+  Vélocité éviterait la ressaisie manuelle.
+- **OKR : historique de progression** : actuellement seule la valeur
+  courante de chaque résultat clé est gardée ; une table `okr_history`
+  (snapshot horodaté à chaque mise à jour) permettrait un graphique
+  d'évolution dans le temps, comme pour la Vélocité.
 - **Rétro : plan d'action** : transformer les notes les plus votées en
   actions assignées (table `retro_actions`), rappelées à la rétro suivante.
 - **Kanban : plus de colonnes / drag & drop** : actuellement 3 colonnes
   fixes et déplacement par boutons ← → (pas de bibliothèque de drag & drop,
   volontairement, pour rester léger) ; une lib comme `@dnd-kit/core` peut
   s'ajouter sans toucher au modèle serveur.
-- **Kanban : plusieurs tableaux liés à une équipe** : aujourd'hui chaque
-  tableau est un lien isolé ; regrouper plusieurs tableaux sous un espace
-  d'équipe serait la vraie marche vers du "Jira-like".
-- **Comptes utilisateurs** : à ce stade, un simple pseudo suffit ; si tu veux
-  des espaces d'équipe persistants, ajoute une table `teams` + un code d'accès
-  avant de te lancer dans de l'auth complète.
+- **Matrice Impact/Effort** : un outil de priorisation à 4 quadrants,
+  réutilisant le pattern de déplacement du Kanban mais avec des
+  coordonnées x/y libres plutôt que des colonnes fixes.
+- **Comptes / espaces d'équipe** : à ce stade, un simple pseudo suffit ;
+  regrouper Kanban + Vélocité + OKR d'une même équipe sous un espace
+  partagé serait la vraie marche vers du "Jira-like" — mais demande une
+  vraie notion de compte, à ne faire que si le besoin se confirme.

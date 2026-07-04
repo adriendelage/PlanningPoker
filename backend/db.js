@@ -70,6 +70,32 @@ async function init() {
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS velocity_sprints (
+      id           SERIAL PRIMARY KEY,
+      session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      sprint_name  TEXT NOT NULL,
+      committed    INT NOT NULL DEFAULT 0,
+      completed    INT NOT NULL DEFAULT 0,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS okr_objectives (
+      id          SERIAL PRIMARY KEY,
+      session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      title       TEXT NOT NULL,
+      position    INT NOT NULL DEFAULT 0,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS okr_key_results (
+      id            SERIAL PRIMARY KEY,
+      objective_id  INT NOT NULL REFERENCES okr_objectives(id) ON DELETE CASCADE,
+      title         TEXT NOT NULL,
+      progress      INT NOT NULL DEFAULT 0,
+      position      INT NOT NULL DEFAULT 0,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions (created_at DESC);
   `);
   console.log("✅ Base de données initialisée");
@@ -194,6 +220,114 @@ async function kanbanLoadBoard(id) {
   };
 }
 
+// ── Vélocité : la base est la source de vérité (comme le Kanban) ───────────
+
+async function velocityAddSprint(sessionId, sprintName, committed, completed) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO velocity_sprints (session_id, sprint_name, committed, completed)
+     VALUES ($1, $2, $3, $4) RETURNING id`,
+    [sessionId, sprintName, committed, completed]
+  );
+  await pool.query(
+    `UPDATE sessions SET task_count = (SELECT COUNT(*) FROM velocity_sprints WHERE session_id = $1) WHERE id = $1`,
+    [sessionId]
+  );
+  return rows[0].id;
+}
+
+async function velocityDeleteSprint(sessionId, sprintId) {
+  if (!enabled()) return;
+  await pool.query(`DELETE FROM velocity_sprints WHERE id = $1`, [sprintId]);
+  await pool.query(
+    `UPDATE sessions SET task_count = (SELECT COUNT(*) FROM velocity_sprints WHERE session_id = $1) WHERE id = $1`,
+    [sessionId]
+  );
+}
+
+async function velocityLoadBoard(id) {
+  if (!enabled()) return null;
+  const s = await pool.query(`SELECT * FROM sessions WHERE id = $1 AND tool = 'velocity'`, [id]);
+  if (s.rows.length === 0) return null;
+  const r = await pool.query(
+    `SELECT id, sprint_name, committed, completed
+     FROM velocity_sprints WHERE session_id = $1 ORDER BY id`,
+    [id]
+  );
+  return {
+    name: s.rows[0].name,
+    sprints: r.rows.map(row => ({
+      id: row.id, name: row.sprint_name, committed: row.committed, completed: row.completed
+    }))
+  };
+}
+
+// ── OKR léger : la base est la source de vérité (comme le Kanban) ──────────
+
+async function okrAddObjective(sessionId, title) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO okr_objectives (session_id, title, position)
+     VALUES ($1, $2, (SELECT COALESCE(MAX(position), -1) + 1 FROM okr_objectives WHERE session_id = $1))
+     RETURNING id`,
+    [sessionId, title]
+  );
+  return rows[0].id;
+}
+
+async function okrDeleteObjective(objectiveId) {
+  if (!enabled()) return;
+  await pool.query(`DELETE FROM okr_objectives WHERE id = $1`, [objectiveId]);
+}
+
+async function okrAddKeyResult(objectiveId, title) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO okr_key_results (objective_id, title, progress, position)
+     VALUES ($1, $2, 0, (SELECT COALESCE(MAX(position), -1) + 1 FROM okr_key_results WHERE objective_id = $1))
+     RETURNING id`,
+    [objectiveId, title]
+  );
+  return rows[0].id;
+}
+
+async function okrUpdateKeyResult(krId, progress) {
+  if (!enabled()) return;
+  await pool.query(`UPDATE okr_key_results SET progress = $2 WHERE id = $1`, [krId, progress]);
+}
+
+async function okrDeleteKeyResult(krId) {
+  if (!enabled()) return;
+  await pool.query(`DELETE FROM okr_key_results WHERE id = $1`, [krId]);
+}
+
+async function okrLoadBoard(id) {
+  if (!enabled()) return null;
+  const s = await pool.query(`SELECT * FROM sessions WHERE id = $1 AND tool = 'okr'`, [id]);
+  if (s.rows.length === 0) return null;
+  const objs = await pool.query(
+    `SELECT id, title FROM okr_objectives WHERE session_id = $1 ORDER BY position, id`,
+    [id]
+  );
+  const krs = await pool.query(
+    `SELECT k.id, k.objective_id, k.title, k.progress
+     FROM okr_key_results k
+     JOIN okr_objectives o ON o.id = k.objective_id
+     WHERE o.session_id = $1
+     ORDER BY k.position, k.id`,
+    [id]
+  );
+  return {
+    name: s.rows[0].name,
+    objectives: objs.rows.map(o => ({
+      id: o.id,
+      title: o.title,
+      keyResults: krs.rows.filter(k => k.objective_id === o.id)
+        .map(k => ({ id: k.id, title: k.title, progress: k.progress }))
+    }))
+  };
+}
+
 async function finishSession(id) {
   if (!enabled()) return;
   await pool.query(
@@ -247,6 +381,21 @@ async function getSession(id) {
       [id]
     );
     results = r.rows;
+  } else if (session.tool === "velocity") {
+    const r = await pool.query(
+      `SELECT id, sprint_name, committed, completed FROM velocity_sprints WHERE session_id = $1 ORDER BY id`,
+      [id]
+    );
+    results = r.rows;
+  } else if (session.tool === "okr") {
+    const r = await pool.query(
+      `SELECT o.title AS objective, k.title AS key_result, k.progress
+       FROM okr_objectives o
+       LEFT JOIN okr_key_results k ON k.objective_id = o.id
+       WHERE o.session_id = $1 ORDER BY o.position, k.position`,
+      [id]
+    );
+    results = r.rows;
   } else {
     const r = await pool.query(
       `SELECT task_index, task, median, votes
@@ -261,5 +410,8 @@ async function getSession(id) {
 module.exports = {
   init, enabled, createSession, saveResult, saveRetroNotes, saveDailyTimes,
   kanbanAddCard, kanbanMoveCard, kanbanDeleteCard, kanbanLoadBoard,
+  velocityAddSprint, velocityDeleteSprint, velocityLoadBoard,
+  okrAddObjective, okrDeleteObjective, okrAddKeyResult, okrUpdateKeyResult,
+  okrDeleteKeyResult, okrLoadBoard,
   finishSession, listSessions, getSession
 };

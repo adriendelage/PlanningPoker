@@ -241,6 +241,44 @@ function broadcastKanban(id) {
 }
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══ Vélocité ══════════════════════════════════════════════════════════════════
+// Comme le Kanban : outil permanent, la BASE est la source de vérité.
+// La mémoire ne sert que de cache pour le temps réel.
+
+let velocities = {};
+
+async function ensureVelocity(id) {
+  if (velocities[id]) return velocities[id];
+  const board = await db.velocityLoadBoard(id);
+  if (board) velocities[id] = board;
+  return velocities[id] || null;
+}
+
+function broadcastVelocity(id) {
+  const v = velocities[id];
+  if (!v) return;
+  io.to("vel:" + id).emit("velocity:state", { name: v.name, sprints: v.sprints });
+}
+
+// ═══ OKR léger ═════════════════════════════════════════════════════════════════
+// Même principe : outil permanent, base = source de vérité.
+
+let okrs = {};
+
+async function ensureOkr(id) {
+  if (okrs[id]) return okrs[id];
+  const board = await db.okrLoadBoard(id);
+  if (board) okrs[id] = board;
+  return okrs[id] || null;
+}
+
+function broadcastOkr(id) {
+  const o = okrs[id];
+  if (!o) return;
+  io.to("okr:" + id).emit("okr:state", { name: o.name, objectives: o.objectives });
+}
+// ═══════════════════════════════════════════════════════════════════════════════
+
 io.on("connection", socket => {
 
   socket.on("session:create", (data, cb) => {
@@ -585,6 +623,126 @@ io.on("connection", socket => {
     k.cards.splice(idx, 1);
     broadcastKanban(id);
     db.kanbanDeleteCard(id, cardId).catch(e => console.error("DB kanbanDeleteCard:", e.message));
+  });
+
+  // ─── Événements Vélocité ────────────────────────────────────────────────────
+
+  socket.on("velocity:create", (data, cb) => {
+    const id = Math.random().toString(36).substring(2, 8);
+    velocities[id] = { name: data.name || null, sprints: [] };
+    socket.join("vel:" + id);
+    cb(id);
+
+    db.createSession({
+      id, name: data.name, hostName: data.hostName, tool: "velocity", taskCount: 0
+    }).catch(e => console.error("DB createSession:", e.message));
+  });
+
+  socket.on("velocity:open", async ({ id }) => {
+    const v = await ensureVelocity(id).catch(() => null);
+    if (!v) return socket.emit("velocity:notfound");
+    socket.join("vel:" + id);
+    socket.emit("velocity:state", { name: v.name, sprints: v.sprints });
+  });
+
+  socket.on("velocity:sprint:add", async ({ id, sprintName, committed, completed }) => {
+    const v = velocities[id];
+    const name = String(sprintName || "").trim().slice(0, 100);
+    const c1 = Math.max(0, Math.min(9999, parseInt(committed) || 0));
+    const c2 = Math.max(0, Math.min(9999, parseInt(completed) || 0));
+    if (!v || !name) return;
+    let sprintId = null;
+    try { sprintId = await db.velocityAddSprint(id, name, c1, c2); }
+    catch (e) { console.error("DB velocityAddSprint:", e.message); }
+    if (sprintId == null) sprintId = "m" + Date.now(); // mode mémoire
+    v.sprints.push({ id: sprintId, name, committed: c1, completed: c2 });
+    broadcastVelocity(id);
+  });
+
+  socket.on("velocity:sprint:delete", ({ id, sprintId }) => {
+    const v = velocities[id];
+    if (!v) return;
+    const idx = v.sprints.findIndex(s => s.id === sprintId);
+    if (idx === -1) return;
+    v.sprints.splice(idx, 1);
+    broadcastVelocity(id);
+    db.velocityDeleteSprint(id, sprintId).catch(e => console.error("DB velocityDeleteSprint:", e.message));
+  });
+
+  // ─── Événements OKR ─────────────────────────────────────────────────────────
+
+  socket.on("okr:create", (data, cb) => {
+    const id = Math.random().toString(36).substring(2, 8);
+    okrs[id] = { name: data.name || null, objectives: [] };
+    socket.join("okr:" + id);
+    cb(id);
+
+    db.createSession({
+      id, name: data.name, hostName: data.hostName, tool: "okr", taskCount: 0
+    }).catch(e => console.error("DB createSession:", e.message));
+  });
+
+  socket.on("okr:open", async ({ id }) => {
+    const o = await ensureOkr(id).catch(() => null);
+    if (!o) return socket.emit("okr:notfound");
+    socket.join("okr:" + id);
+    socket.emit("okr:state", { name: o.name, objectives: o.objectives });
+  });
+
+  socket.on("okr:objective:add", async ({ id, title }) => {
+    const o = okrs[id];
+    const t = String(title || "").trim().slice(0, 200);
+    if (!o || !t) return;
+    let objId = null;
+    try { objId = await db.okrAddObjective(id, t); }
+    catch (e) { console.error("DB okrAddObjective:", e.message); }
+    if (objId == null) objId = "m" + Date.now();
+    o.objectives.push({ id: objId, title: t, keyResults: [] });
+    broadcastOkr(id);
+  });
+
+  socket.on("okr:objective:delete", ({ id, objectiveId }) => {
+    const o = okrs[id];
+    if (!o) return;
+    const idx = o.objectives.findIndex(x => x.id === objectiveId);
+    if (idx === -1) return;
+    o.objectives.splice(idx, 1);
+    broadcastOkr(id);
+    db.okrDeleteObjective(objectiveId).catch(e => console.error("DB okrDeleteObjective:", e.message));
+  });
+
+  socket.on("okr:kr:add", async ({ id, objectiveId, title }) => {
+    const o = okrs[id];
+    const t = String(title || "").trim().slice(0, 200);
+    const obj = o?.objectives.find(x => x.id === objectiveId);
+    if (!obj || !t) return;
+    let krId = null;
+    try { krId = await db.okrAddKeyResult(objectiveId, t); }
+    catch (e) { console.error("DB okrAddKeyResult:", e.message); }
+    if (krId == null) krId = "m" + Date.now();
+    obj.keyResults.push({ id: krId, title: t, progress: 0 });
+    broadcastOkr(id);
+  });
+
+  socket.on("okr:kr:update", ({ id, objectiveId, krId, progress }) => {
+    const o = okrs[id];
+    const obj = o?.objectives.find(x => x.id === objectiveId);
+    const kr = obj?.keyResults.find(k => k.id === krId);
+    if (!kr) return;
+    kr.progress = Math.max(0, Math.min(100, parseInt(progress) || 0));
+    broadcastOkr(id);
+    db.okrUpdateKeyResult(krId, kr.progress).catch(e => console.error("DB okrUpdateKeyResult:", e.message));
+  });
+
+  socket.on("okr:kr:delete", ({ id, objectiveId, krId }) => {
+    const o = okrs[id];
+    const obj = o?.objectives.find(x => x.id === objectiveId);
+    if (!obj) return;
+    const idx = obj.keyResults.findIndex(k => k.id === krId);
+    if (idx === -1) return;
+    obj.keyResults.splice(idx, 1);
+    broadcastOkr(id);
+    db.okrDeleteKeyResult(krId).catch(e => console.error("DB okrDeleteKeyResult:", e.message));
   });
 
   socket.on("disconnect", () => {
