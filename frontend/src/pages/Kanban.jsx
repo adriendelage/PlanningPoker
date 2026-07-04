@@ -1,6 +1,7 @@
 import { useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import socket from "../socket";
+import { addLocalSession, getLocalSessions } from "../localHistory";
 
 const COLUMNS = [
   { name: "À faire",  accent: "#9b5de5", icon: "📥" },
@@ -62,6 +63,14 @@ export default function Kanban() {
       socket.off("connect", onReconnect);
     };
   }, [id]);
+
+  // Trace la visite dans l'historique local, sans écraser le rôle "host"
+  // déjà enregistré si ce tableau a été créé depuis ce même navigateur.
+  useEffect(() => {
+    if (!state) return;
+    const existing = getLocalSessions().find(s => s.id === id && s.tool === "kanban");
+    addLocalSession({ id, tool: "kanban", name: state.name, role: existing?.role || "guest" });
+  }, [id, state?.name]);
 
   const add = () => {
     if (!draft.trim()) return;

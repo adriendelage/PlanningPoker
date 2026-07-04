@@ -1,6 +1,7 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import socket from "../socket";
+import { addLocalSession } from "../localHistory";
 
 export default function DailyInvite() {
   const { id } = useParams();
@@ -10,6 +11,7 @@ export default function DailyInvite() {
   const join = () => {
     if (!name.trim()) return alert("Veuillez saisir votre nom");
     socket.emit("daily:join", { id, name });
+    addLocalSession({ id, tool: "daily", name, role: "guest" });
     nav("/daily/" + id);
   };
 

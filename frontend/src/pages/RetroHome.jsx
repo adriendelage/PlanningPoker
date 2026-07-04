@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
+import { addLocalSession } from "../localHistory";
 
 const TEMPLATES = [
   { id: "ssc",  name: "Start · Stop · Continue", columns: ["Start", "Stop", "Continue"] },
@@ -26,6 +27,7 @@ export default function RetroHome() {
     const cols = columns.map(c => c.trim()).filter(Boolean);
     if (cols.length < 2) return alert("Il faut au moins 2 colonnes");
     socket.emit("retro:create", { sessionName, hostName, columns: cols, maxVotes }, (id) => {
+      addLocalSession({ id, tool: "retro", name: sessionName, role: "host" });
       nav("/retro/" + id + "?host=true");
     });
   };

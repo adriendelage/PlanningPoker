@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
+import { addLocalSession } from "../localHistory";
 
 export default function Home(){
   const [sessionName,setSessionName]=useState("");
@@ -11,6 +12,7 @@ export default function Home(){
   const create=()=>{
     if(!hostName.trim()) return alert("Veuillez saisir votre nom");
     socket.emit("session:create",{sessionName,tasks,hostName},(id)=>{
+      addLocalSession({ id, tool: "poker", name: sessionName, role: "host" });
       nav("/poker/"+id+"?host=true");
     });
   };

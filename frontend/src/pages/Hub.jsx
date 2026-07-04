@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api";
+import { getLocalSessions, removeLocalSession } from "../localHistory";
 
 const TOOLS = [
   {
@@ -45,29 +45,39 @@ const TOOLS = [
   },
 ];
 
+// Où renvoyer l'utilisateur selon l'outil et son rôle lors de sa dernière visite.
+// Kanban n'a pas d'étape « rejoindre » : on rouvre toujours le tableau directement.
+function resolveLink(entry) {
+  const { id, tool, role } = entry;
+  if (tool === "kanban") return `/kanban/${id}`;
+  if (role === "host") return `/${tool}/${id}?host=true`;
+  return `/${tool}/join/${id}`;
+}
+
+const TOOL_META = {
+  poker:  { icon: "🃏", accent: "#00f5d4" },
+  retro:  { icon: "🔄", accent: "#f15bb5" },
+  daily:  { icon: "⏱️", accent: "#fee440" },
+  kanban: { icon: "📋", accent: "#9b5de5" },
+};
+
+function fmtDate(ts) {
+  return new Date(ts).toLocaleDateString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
 export default function Hub() {
   const nav = useNavigate();
-  const [recent, setRecent] = useState([]);
-  const [expanded, setExpanded] = useState(null); // id de session dépliée
-  const [details, setDetails] = useState({});     // cache des résultats {id: [...]}
+  const [mine, setMine] = useState([]);
 
   useEffect(() => {
-    api.listSessions(8).then(setRecent).catch(() => setRecent([]));
+    setMine(getLocalSessions());
   }, []);
 
-  const toggleDetails = async (s) => {
-    if (expanded === s.id) return setExpanded(null);
-    setExpanded(s.id);
-    if (!details[s.id] && s.results_count > 0) {
-      try {
-        const full = await api.getSession(s.id);
-        setDetails(d => ({ ...d, [s.id]: full.results }));
-      } catch { /* silencieux */ }
-    }
+  const forget = (e, entry) => {
+    e.stopPropagation();
+    removeLocalSession(entry.id, entry.tool);
+    setMine(list => list.filter(s => !(s.id === entry.id && s.tool === entry.tool)));
   };
-
-  const fmtDate = (iso) =>
-    new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
   return (
     <div style={{ minHeight: "100vh", background: "#0d0d1a", color: "#fff", padding: "48px 16px" }}>
@@ -78,6 +88,8 @@ export default function Hub() {
         .tool-card.soon:hover { transform: none; }
         .session-row { transition: background .15s ease; cursor: pointer; }
         .session-row:hover { background: #16162a; }
+        .session-row:hover .forget-btn { opacity: 1; }
+        .forget-btn { opacity: 0; transition: opacity .15s ease; }
         @media (prefers-reduced-motion: reduce) {
           .tool-card, .session-row { transition: none; }
           .tool-card:hover { transform: none; }
@@ -126,7 +138,6 @@ export default function Hub() {
                 boxShadow: tool.active ? `0 0 0 0 ${tool.accent}00` : "none",
               }}
             >
-              {/* Symbole de carte en filigrane */}
               <div style={{
                 position: "absolute", right: -8, bottom: -22,
                 fontSize: 110, color: tool.accent, opacity: .07,
@@ -163,71 +174,49 @@ export default function Hub() {
           ))}
         </div>
 
-        {/* ── Sessions récentes (visible seulement si la base renvoie des données) ── */}
-        {recent.length > 0 && (
+        {/* ── Mes sessions (privé — stocké uniquement dans ce navigateur) ── */}
+        {mine.length > 0 && (
           <section>
-            <h2 style={{ fontSize: 16, fontWeight: 600, color: "#aaa", letterSpacing: .5, textTransform: "uppercase", marginBottom: 14 }}>
-              Sessions récentes
+            <h2 style={{ fontSize: 16, fontWeight: 600, color: "#aaa", letterSpacing: .5, textTransform: "uppercase", marginBottom: 6 }}>
+              Mes sessions
             </h2>
+            <p style={{ fontSize: 12.5, color: "#555", margin: "0 0 14px" }}>
+              🔒 Visible uniquement sur cet appareil — jamais partagé avec qui que ce soit.
+            </p>
             <div style={{ background: "#111", border: "1px solid #222", borderRadius: 16, overflow: "hidden" }}>
-              {recent.map((s, i) => (
-                <div key={s.id}>
+              {mine.map((s, i) => {
+                const meta = TOOL_META[s.tool] || TOOL_META.poker;
+                return (
                   <div
+                    key={`${s.tool}:${s.id}`}
                     className="session-row"
-                    onClick={() => s.finished_at
-                      ? toggleDetails(s)
-                      : nav(s.tool === "retro" ? `/retro/join/${s.id}` : `/join/${s.id}`)}
+                    onClick={() => nav(resolveLink(s))}
                     style={{
                       display: "flex", alignItems: "center", gap: 14,
                       padding: "14px 18px",
                       borderTop: i > 0 ? "1px solid #1c1c30" : "none",
                     }}
                   >
-                    <span style={{ fontSize: 18 }}>{s.tool === "retro" ? "🔄" : "🃏"}</span>
+                    <span style={{ fontSize: 18 }}>{meta.icon}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 15, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {s.name || `Session ${s.id}`}
                       </div>
                       <div style={{ fontSize: 12.5, color: "#666" }}>
-                        {s.host_name ? `par ${s.host_name} · ` : ""}{fmtDate(s.created_at)} · {s.task_count} {s.tool === "retro" ? "note" : "tâche"}{s.task_count > 1 ? "s" : ""}
+                        {s.role === "host" ? "créée par toi" : "rejointe"} · {fmtDate(s.at)}
                       </div>
                     </div>
-                    {s.finished_at ? (
-                      <span style={{ fontSize: 12, color: "#00f5d4", border: "1px solid #00f5d433", borderRadius: 999, padding: "3px 10px" }}>
-                        Terminée {expanded === s.id ? "▴" : "▾"}
-                      </span>
-                    ) : (
-                      <span style={{ fontSize: 12, color: "#fee440", border: "1px solid #fee44033", borderRadius: 999, padding: "3px 10px" }}>
-                        Rejoindre →
-                      </span>
-                    )}
+                    <button className="forget-btn" onClick={e => forget(e, s)}
+                      title="Retirer de mon historique"
+                      style={{ background: "none", border: "1px solid #333", borderRadius: 8, color: "#666", fontSize: 12, padding: "4px 10px", cursor: "pointer" }}>
+                      ✕
+                    </button>
+                    <span style={{ fontSize: 12, color: meta.accent, border: `1px solid ${meta.accent}33`, borderRadius: 999, padding: "3px 10px" }}>
+                      Ouvrir →
+                    </span>
                   </div>
-
-                  {/* Résultats dépliés */}
-                  {expanded === s.id && (
-                    <div style={{ padding: "4px 18px 16px 50px", borderTop: "1px dashed #1c1c30" }}>
-                      {(details[s.id] || []).length === 0 ? (
-                        <p style={{ color: "#555", fontSize: 13, margin: "10px 0 0" }}>Rien n'a été enregistré pour cette session.</p>
-                      ) : s.tool === "retro" ? (
-                        details[s.id].map((r, j) => (
-                          <div key={j} style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "8px 0", borderBottom: "1px solid #1a1a2e", fontSize: 14 }}>
-                            <span style={{ color: "#f15bb5", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>{r.column_name}</span>
-                            <span style={{ flex: 1, color: "#ccc" }}>{r.content}</span>
-                            {r.votes > 0 && <span style={{ color: "#f15bb5", fontWeight: 700, whiteSpace: "nowrap" }}>{r.votes} ●</span>}
-                          </div>
-                        ))
-                      ) : (
-                        details[s.id].map(r => (
-                          <div key={r.task_index} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #1a1a2e", fontSize: 14 }}>
-                            <span style={{ color: "#ccc" }}>{r.task}</span>
-                            <span style={{ color: "#00f5d4", fontWeight: 700 }}>{r.median ?? "—"} pts</span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
         )}

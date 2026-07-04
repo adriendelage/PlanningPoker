@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
+import { addLocalSession } from "../localHistory";
 
 const DURATIONS = [60, 90, 120, 180, 300];
 
@@ -13,6 +14,7 @@ export default function DailyHome() {
   const create = () => {
     if (!hostName.trim()) return alert("Veuillez saisir votre nom");
     socket.emit("daily:create", { sessionName, hostName, secondsPerPerson: seconds }, (id) => {
+      addLocalSession({ id, tool: "daily", name: sessionName, role: "host" });
       nav("/daily/" + id + "?host=true");
     });
   };

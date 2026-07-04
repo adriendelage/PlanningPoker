@@ -14,28 +14,11 @@ app.get("/api/health", (req, res) => {
   res.json({ ok: true, db: db.enabled() });
 });
 
-// Sessions récentes (pour le hub)
-app.get("/api/sessions", async (req, res) => {
-  try {
-    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
-    res.json(await db.listSessions(limit));
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Erreur base de données" });
-  }
-});
-
-// Détail d'une session terminée (résultats des votes)
-app.get("/api/sessions/:id", async (req, res) => {
-  try {
-    const session = await db.getSession(req.params.id);
-    if (!session) return res.status(404).json({ error: "Session introuvable" });
-    res.json(session);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Erreur base de données" });
-  }
-});
+// Remarque : il n'y a volontairement aucun endpoint qui liste ou expose
+// les sessions passées. Ces données (noms, hôtes, contenu des votes/notes)
+// restent en base à des fins de fiabilité/diagnostic, mais ne sont jamais
+// servies publiquement — le hub s'appuie uniquement sur l'historique local
+// du navigateur de chaque utilisateur (voir frontend/src/localHistory.js).
 
 // ── Servir le frontend buildé ─────────────────────────────────────────────────
 const frontendDist = path.resolve(__dirname, "../frontend/dist");

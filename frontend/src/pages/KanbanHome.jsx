@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
+import { addLocalSession } from "../localHistory";
 
 export default function KanbanHome() {
   const [name, setName] = useState("");
@@ -11,6 +12,7 @@ export default function KanbanHome() {
     if (!hostName.trim()) return alert("Veuillez saisir votre nom");
     if (!name.trim()) return alert("Donne un nom au tableau");
     socket.emit("kanban:create", { name, hostName }, (id) => {
+      addLocalSession({ id, tool: "kanban", name, role: "host" });
       nav("/kanban/" + id);
     });
   };

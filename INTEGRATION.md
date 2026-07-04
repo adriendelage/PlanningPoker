@@ -1,22 +1,63 @@
 # 🧰 Agile Toolbox — Guide d'intégration
 
-Extension de Planning Poker Pro : hub d'accueil multi-outils, persistance
-PostgreSQL, et premier nouvel outil — la **Rétrospective**.
+Extension de Planning Poker Pro en boîte à outils complète : hub d'accueil,
+persistance PostgreSQL, et 3 nouveaux outils — **Rétrospective**,
+**Daily Timer** et **Kanban léger**.
 
 ## Fichiers à intégrer dans ton repo
 
 | Fichier | Action | Rôle |
 |---|---|---|
 | `backend/db.js` | **Nouveau** | Module PostgreSQL (pool `pg`, schéma auto-créé, dégradation gracieuse sans DB) |
-| `backend/server.js` | **Remplace** | Serveur existant + persistance + API REST `/api/*` + événements Rétro |
+| `backend/server.js` | **Remplace** | Serveur + persistance + événements Rétro/Daily/Kanban — **aucun endpoint public de liste** |
 | `backend/package.json` | **Remplace** | Ajout de la dépendance `pg` |
-| `frontend/src/pages/Hub.jsx` | **Nouveau** | Page d'accueil : grille d'outils + sessions récentes (poker & rétro) |
-| `frontend/src/pages/RetroHome.jsx` | **Nouveau** | Création de rétro : templates de colonnes, nb de votes |
-| `frontend/src/pages/RetroInvite.jsx` | **Nouveau** | Page de jointure (`/retro/join/:id`) |
+| `backend/package-lock.json` | **Remplace** | Synchronisé avec `pg` (nécessaire pour `npm ci`) |
+| `frontend/src/localHistory.js` | **Nouveau** | Historique **local au navigateur** (remplace l'ancien `api.js`, supprimé) |
+| `frontend/src/pages/Hub.jsx` | **Remplace** | Grille d'outils + « Mes sessions » (lu depuis `localStorage`, pas du serveur) |
+| `frontend/src/pages/Home.jsx` | **Remplace** | Enregistre la création dans l'historique local |
+| `frontend/src/pages/Invite.jsx` | **Remplace** | Enregistre la jointure dans l'historique local |
+| `frontend/src/pages/RetroHome.jsx` | **Remplace** | idem, pour la Rétro |
+| `frontend/src/pages/RetroInvite.jsx` | **Remplace** | idem, pour la Rétro |
 | `frontend/src/pages/Retro.jsx` | **Nouveau** | Tableau de rétro : phases écriture → vote → bilan |
-| `frontend/src/api.js` | **Nouveau** | Client REST (même origine que le socket) |
-| `frontend/src/App.jsx` | **Remplace** | Routing : `/` → Hub, `/poker`, `/retro` |
-| `frontend/src/pages/Home.jsx` | **Remplace** | Ajout du lien « ← Retour aux outils » |
+| `frontend/src/pages/DailyHome.jsx` | **Remplace** | idem, pour le Daily |
+| `frontend/src/pages/DailyInvite.jsx` | **Remplace** | idem, pour le Daily |
+| `frontend/src/pages/Daily.jsx` | **Nouveau** | Lobby → rotation chronométrée → bilan des temps |
+| `frontend/src/pages/KanbanHome.jsx` | **Remplace** | idem, pour le Kanban |
+| `frontend/src/pages/Kanban.jsx` | **Remplace** | Tableau partagé permanent + trace la visite localement |
+
+⚠️ **`frontend/src/api.js` doit être supprimé de ton repo** — il n'est plus
+utilisé par rien (le hub ne fait plus aucun appel réseau pour son historique).
+
+## Confidentialité — pourquoi pas de liste publique des sessions
+
+La première version du hub affichait un historique global (« Sessions
+récentes ») alimenté par `GET /api/sessions` : n'importe quel visiteur du
+site pouvait voir le nom de toutes les sessions créées par tout le monde,
+y compris leur contenu une fois terminées. C'est le genre de fuite qu'on
+ne veut évidemment pas.
+
+**Ce qui a été retiré :**
+- Les routes `GET /api/sessions` et `GET /api/sessions/:id` n'existent plus.
+- `frontend/src/api.js` (le client qui les appelait) est supprimé.
+
+**Ce qui les remplace : un historique 100 % local au navigateur.**
+`frontend/src/localHistory.js` enregistre dans le `localStorage` de chaque
+visiteur les sessions qu'*il* a créées ou rejointes — jamais transmis au
+serveur, jamais visible par quelqu'un d'autre. Le hub affiche cette liste
+sous « Mes sessions », avec un bouton pour retirer une entrée.
+
+**Pourquoi pas une solution par IP ou par compte ?**
+- *Par IP* : peu fiable (NAT d'entreprise, 4G partagée, VPN — plusieurs
+  personnes partagent souvent la même IP publique) et donnerait une fausse
+  impression de confidentialité tout en ajoutant de la complexité.
+- *Par compte* : demanderait un système d'authentification complet
+  (inscription, mots de passe ou OAuth, sessions serveur) disproportionné
+  pour un outil que l'équipe utilise sans friction via un simple lien.
+
+La base garde toujours les données (`sessions`, `poker_results`,
+`retro_notes`, `daily_times`, `kanban_cards`) pour la fiabilité et un futur
+usage interne éventuel (export CSV pour toi, par exemple), mais rien n'est
+plus exposé publiquement via HTTP.
 
 ## L'outil Rétrospective
 
@@ -41,6 +82,43 @@ rebind de l'hôte comme `poker:state`), `retro:note:add`, `retro:note:delete`,
 ⚠️ Contrairement au broadcast du poker, l'état de la rétro est émis
 **par participant** (`io.to(p.id).emit`) puisque chacun voit un état
 différent pendant l'écriture.
+
+## L'outil Daily Timer
+
+Session éphémère comme le Poker/la Rétro. Un lobby où l'équipe se rassemble
+(ordre de passage = ordre d'arrivée), puis une rotation chronométrée :
+chaque speaker a un temps alloué (**plancher forcé à 30 secondes**, plafond
+600s, côté serveur), le décompte peut passer en négatif (dépassement affiché
+en rouge). Le speaker courant *ou* l'hôte peut passer au suivant — pratique
+si l'animateur veut garder la main, ou laisser chacun s'autogérer.
+
+Événements : `daily:create`, `daily:join`, `daily:state` (reconnexion),
+`daily:start` (hôte uniquement), `daily:next`. Le temps de chacun est
+incrémenté serveur-side chaque seconde et persisté dans `daily_times`
+à la fin.
+
+Note de robustesse : une coupure réseau pendant la rotation (`phase !==
+"lobby"`) ne retire **pas** le participant — sinon la liste des speakers
+se désynchroniserait en plein daily. Seules les déconnexions en lobby
+sont nettoyées.
+
+## L'outil Kanban léger
+
+Seul outil du hub où **la base est la source de vérité** — pas de nettoyage
+après 24h, pas de notion de session "terminée". On crée un tableau une fois,
+on garde le lien, on y revient (et l'équipe aussi, en simultané).
+
+Chaque tableau a 3 colonnes fixes : À faire, En cours, Terminé. En mémoire,
+`kanbans[id]` sert de cache pour diffuser le temps réel (room Socket.IO
+`kb:<id>`) ; à froid, `db.kanbanLoadBoard(id)` recharge tout depuis
+`kanban_cards`. Vérifié par test : un tableau créé, modifié, puis **redémarrage
+complet du serveur** (mémoire vidée, comme un redeploy Railway) → le tableau
+se recharge à l'identique à la prochaine ouverture.
+
+Événements : `kanban:create`, `kanban:open` (charge depuis la base si absent
+de la mémoire), `kanban:card:add`, `kanban:card:move`, `kanban:card:delete`.
+Sans `DATABASE_URL`, `kanban:open` renvoie `kanban:notfound` après un
+redémarrage — c'est attendu, l'outil n'a de sens qu'avec une base.
 
 Aucune modification dans `Poker.jsx`, `Invite.jsx`, `socket.js` — les liens
 d'invitation existants (`/join/:id`, `/poker/:id`) restent valides.
@@ -77,11 +155,13 @@ sessions      (id, name, host_name, tool, task_count, created_at, finished_at)
 poker_results (id, session_id → sessions, task_index, task, median, votes JSONB,
                UNIQUE(session_id, task_index))
 retro_notes   (id, session_id → sessions, column_name, content, votes)
+daily_times   (id, session_id → sessions, name, seconds_used)
+kanban_cards  (id, session_id → sessions, column_name, title, created_at)
 ```
 
-Une seule table `sessions` pour tout le hub (`tool` = `'poker'` ou `'retro'`),
-avec une table de résultats par outil. `GET /api/sessions/:id` renvoie
-`results` dans le format propre à l'outil.
+Une seule table `sessions` pour tout le hub (`tool` = `poker` / `retro` /
+`daily` / `kanban`), avec une table de résultats par outil.
+`GET /api/sessions/:id` renvoie `results` dans le format propre à l'outil.
 
 ## Dev local
 
@@ -109,13 +189,18 @@ ajoute dans `vite.config.js` (section `server.proxy`) :
 
 ## Pistes pour la suite
 
-- **Daily Timer** : outil purement temps réel, le `startTimer` du serveur
-  est déjà généralisable.
-- **Kanban** : premier outil où la base devient la source de vérité
-  (les cartes survivent entre les sessions), bon banc d'essai avant
-  d'aller vers du "vrai" Jira-like.
+Les 4 outils du hub sont maintenant tous fonctionnels. Pistes pour aller
+plus loin :
+
 - **Rétro : plan d'action** : transformer les notes les plus votées en
   actions assignées (table `retro_actions`), rappelées à la rétro suivante.
+- **Kanban : plus de colonnes / drag & drop** : actuellement 3 colonnes
+  fixes et déplacement par boutons ← → (pas de bibliothèque de drag & drop,
+  volontairement, pour rester léger) ; une lib comme `@dnd-kit/core` peut
+  s'ajouter sans toucher au modèle serveur.
+- **Kanban : plusieurs tableaux liés à une équipe** : aujourd'hui chaque
+  tableau est un lien isolé ; regrouper plusieurs tableaux sous un espace
+  d'équipe serait la vraie marche vers du "Jira-like".
 - **Comptes utilisateurs** : à ce stade, un simple pseudo suffit ; si tu veux
   des espaces d'équipe persistants, ajoute une table `teams` + un code d'accès
   avant de te lancer dans de l'auth complète.

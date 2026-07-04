@@ -1,6 +1,7 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import socket from "../socket";
+import { addLocalSession } from "../localHistory";
 
 export default function RetroInvite() {
   const { id } = useParams();
@@ -10,6 +11,7 @@ export default function RetroInvite() {
   const join = () => {
     if (!name.trim()) return alert("Veuillez saisir votre nom");
     socket.emit("retro:join", { id, name });
+    addLocalSession({ id, tool: "retro", name, role: "guest" });
     nav("/retro/" + id);
   };
 
