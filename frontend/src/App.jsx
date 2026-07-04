@@ -17,6 +17,8 @@ import OkrHome from "./pages/OkrHome.jsx";
 import Okr from "./pages/Okr.jsx";
 import GanttHome from "./pages/GanttHome.jsx";
 import Gantt from "./pages/Gantt.jsx";
+import CapacityHome from "./pages/CapacityHome.jsx";
+import Capacity from "./pages/Capacity.jsx";
 
 export default function App(){
   return (
@@ -54,6 +56,10 @@ export default function App(){
       {/* Rétro-planning (Gantt + chemin critique) */}
       <Route path="/gantt" element={<GanttHome/>}/>
       <Route path="/gantt/:id" element={<Gantt/>}/>
+
+      {/* Planificateur de capacité */}
+      <Route path="/capacity" element={<CapacityHome/>}/>
+      <Route path="/capacity/:id" element={<Capacity/>}/>
     </Routes>
   )
 }

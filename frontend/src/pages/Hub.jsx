@@ -73,12 +73,22 @@ const TOOLS = [
     path: "/gantt",
     active: true,
   },
+  {
+    id: "capacity",
+    icon: "🧮",
+    suit: "≈",
+    name: "Planificateur de capacité",
+    desc: "Estime la capacité du prochain sprint selon la disponibilité réelle de chaque membre.",
+    accent: "#06d6a0",
+    path: "/capacity",
+    active: true,
+  },
 ];
 
 // Où renvoyer l'utilisateur selon l'outil et son rôle lors de sa dernière visite.
 // Kanban, Vélocité et OKR n'ont pas d'étape « rejoindre » : on rouvre
 // toujours le tableau directement, quel que soit le rôle.
-const PERMANENT_TOOLS = ["kanban", "velocity", "okr", "gantt"];
+const PERMANENT_TOOLS = ["kanban", "velocity", "okr", "gantt", "capacity"];
 function resolveLink(entry) {
   const { id, tool, role } = entry;
   if (PERMANENT_TOOLS.includes(tool)) return `/${tool}/${id}`;
@@ -94,6 +104,7 @@ const TOOL_META = {
   velocity: { icon: "📈", accent: "#00bbf9" },
   okr:      { icon: "🎯", accent: "#ff9f1c" },
   gantt:    { icon: "📅", accent: "#e63946" },
+  capacity: { icon: "🧮", accent: "#06d6a0" },
 };
 
 function fmtDate(ts) {
