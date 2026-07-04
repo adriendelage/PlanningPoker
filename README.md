@@ -1,6 +1,7 @@
 # 🃏 Planning Poker Pro
 
 Application de planning poker en temps réel — React + Node.js + Socket.IO.
+https://mr1dridri.netlify.app/
 
 ## Stack
 
