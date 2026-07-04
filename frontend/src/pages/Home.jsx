@@ -41,6 +41,10 @@ export default function Home(){
     <div style={{minHeight:"100vh",background:"#0d0d1a",display:"flex",alignItems:"center",justifyContent:"center",padding:"24px 16px"}}>
       <div style={{width:"100%",maxWidth:540,color:"#fff"}}>
 
+        <a href="/" style={{display:"inline-block",color:"#666",fontSize:14,textDecoration:"none",marginBottom:16}}>
+          ← Retour aux outils
+        </a>
+
         <div style={{textAlign:"center",marginBottom:36}}>
           <div style={{fontSize:52,marginBottom:8}}>🃏</div>
           <h1 style={{margin:0,fontSize:32,fontWeight:700,color:"#00f5d4"}}>Planning Poker</h1>
