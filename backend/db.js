@@ -116,6 +116,20 @@ async function init() {
       UNIQUE (task_id, depends_on_id)
     );
 
+    -- Chaque entrée = un sprint planifié : vélocité de référence (que
+    -- l'utilisateur récupère manuellement depuis son tableau de Vélocité
+    -- s'il en a un — pas de lien inter-outils en base, pour rester simple)
+    -- et disponibilité de chaque membre pour ce sprint.
+    CREATE TABLE IF NOT EXISTS capacity_entries (
+      id           SERIAL PRIMARY KEY,
+      session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      sprint_name  TEXT NOT NULL,
+      ref_velocity INT NOT NULL DEFAULT 0,
+      members      JSONB NOT NULL DEFAULT '[]',
+      suggested    INT NOT NULL DEFAULT 0,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions (created_at DESC);
   `);
   console.log("✅ Base de données initialisée");
@@ -421,6 +435,52 @@ async function ganttLoadBoard(id) {
   };
 }
 
+// ── Planificateur de capacité : la base est la source de vérité ────────────
+
+async function capacityAddEntry(sessionId, sprintName, refVelocity, members, suggested) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO capacity_entries (session_id, sprint_name, ref_velocity, members, suggested)
+     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    [sessionId, sprintName, refVelocity, JSON.stringify(members), suggested]
+  );
+  await pool.query(
+    `UPDATE sessions SET task_count = (SELECT COUNT(*) FROM capacity_entries WHERE session_id = $1) WHERE id = $1`,
+    [sessionId]
+  );
+  return rows[0].id;
+}
+
+async function capacityDeleteEntry(sessionId, entryId) {
+  if (!enabled()) return;
+  await pool.query(`DELETE FROM capacity_entries WHERE id = $1`, [entryId]);
+  await pool.query(
+    `UPDATE sessions SET task_count = (SELECT COUNT(*) FROM capacity_entries WHERE session_id = $1) WHERE id = $1`,
+    [sessionId]
+  );
+}
+
+async function capacityLoadBoard(id) {
+  if (!enabled()) return null;
+  const s = await pool.query(`SELECT * FROM sessions WHERE id = $1 AND tool = 'capacity'`, [id]);
+  if (s.rows.length === 0) return null;
+  const r = await pool.query(
+    `SELECT id, sprint_name, ref_velocity, members, suggested
+     FROM capacity_entries WHERE session_id = $1 ORDER BY id`,
+    [id]
+  );
+  return {
+    name: s.rows[0].name,
+    entries: r.rows.map(row => ({
+      id: row.id,
+      sprintName: row.sprint_name,
+      refVelocity: row.ref_velocity,
+      members: row.members,
+      suggested: row.suggested,
+    }))
+  };
+}
+
 async function finishSession(id) {
   if (!enabled()) return;
   await pool.query(
@@ -500,6 +560,13 @@ async function getSession(id) {
       [id]
     );
     results = r.rows;
+  } else if (session.tool === "capacity") {
+    const r = await pool.query(
+      `SELECT sprint_name, ref_velocity, members, suggested
+       FROM capacity_entries WHERE session_id = $1 ORDER BY id`,
+      [id]
+    );
+    results = r.rows;
   } else {
     const r = await pool.query(
       `SELECT task_index, task, median, votes
@@ -518,5 +585,6 @@ module.exports = {
   okrAddObjective, okrDeleteObjective, okrAddKeyResult, okrUpdateKeyResult,
   okrDeleteKeyResult, okrLoadBoard,
   ganttAddTask, ganttUpdateTask, ganttDeleteTask, ganttSetDependencies, ganttLoadBoard,
+  capacityAddEntry, capacityDeleteEntry, capacityLoadBoard,
   finishSession, listSessions, getSession
 };

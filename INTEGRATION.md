@@ -1,10 +1,10 @@
 # 🧰 Agile Toolbox — Guide d'intégration
 
 Extension de Planning Poker Pro en boîte à outils complète : hub d'accueil,
-persistance PostgreSQL, historique privé (local au navigateur), et 6 nouveaux
+persistance PostgreSQL, historique privé (local au navigateur), et 7 nouveaux
 outils — **Rétrospective**, **Daily Timer**, **Kanban léger**,
-**Suivi de vélocité**, **OKR léger** et **Rétro-planning** (Gantt +
-chemin critique).
+**Suivi de vélocité**, **OKR léger**, **Rétro-planning** (Gantt + chemin
+critique) et **Planificateur de capacité**.
 
 ## Fichiers à intégrer dans ton repo
 
@@ -33,6 +33,8 @@ chemin critique).
 | `frontend/src/cpm.js` | **Nouveau** | Moteur de calcul du chemin critique (fonction pure, testée isolément) |
 | `frontend/src/pages/GanttHome.jsx` | **Nouveau** | Création d'un rétro-planning |
 | `frontend/src/pages/Gantt.jsx` | **Nouveau** | Graphique de Gantt (SVG fait main) + tâches/dépendances + chemin critique |
+| `frontend/src/pages/CapacityHome.jsx` | **Nouveau** | Création d'un tableau de capacité |
+| `frontend/src/pages/Capacity.jsx` | **Nouveau** | Planification de sprint : disponibilité par membre, capacité suggérée, historique |
 
 ⚠️ **`frontend/src/api.js` doit être supprimé de ton repo** — il n'est plus
 utilisé par rien (le hub ne fait plus aucun appel réseau pour son historique).
@@ -218,6 +220,35 @@ l'ensemble des dépendances d'une tâche), `gantt:task:delete` (nettoie
 aussi les références orphelines chez les autres tâches). Reprise après
 redémarrage vérifiée comme pour les autres outils permanents.
 
+## L'outil Planificateur de capacité
+
+Le complément naturel du Suivi de vélocité : à chaque nouveau sprint, on
+saisit la disponibilité (0-100 %) de chaque membre de l'équipe, et l'outil
+suggère une capacité en points = vélocité de référence × disponibilité
+moyenne de l'équipe.
+
+**Simplification assumée** : pas de lien en base entre ce tableau et un
+tableau de Vélocité existant — la "vélocité de référence" est un simple
+champ numérique que l'utilisateur renseigne à la main (typiquement en
+regardant son tableau de Vélocité à côté). Un vrai lien inter-outils
+(aller chercher automatiquement la vélocité moyenne d'un tableau existant)
+demanderait de faire référence à une autre session depuis le serveur, ce
+qui casserait l'indépendance actuelle de chaque tableau — une piste pour
+plus tard si le besoin se confirme, mais pas nécessaire pour que l'outil
+soit utile dès maintenant.
+
+Contrairement au Gantt où le calcul (CPM) est fait côté client car
+partagé par construction, ici le calcul (une simple moyenne) est fait
+**côté serveur**, au moment de l'ajout d'une entrée — ça garantit que la
+valeur stockée en base est figée au moment de la saisie, même si la
+vélocité de référence est ensuite réutilisée différemment sur un sprint
+suivant.
+
+Événements : `capacity:create`, `capacity:open`, `capacity:entry:add`
+(bornes serveur : vélocité 0-9999, disponibilité 0-100 par membre, 30
+membres max par entrée, noms vides filtrés), `capacity:entry:delete`.
+Reprise après redémarrage vérifiée comme pour les autres outils permanents.
+
 ## Base de données sur Railway
 
 1. Dans ton projet Railway : **+ New → Database → PostgreSQL**
@@ -259,13 +290,15 @@ okr_key_results (id, objective_id → okr_objectives, title, progress, position,
 gantt_tasks     (id, session_id → sessions, name, duration, position, created_at)
 gantt_dependencies (id, task_id → gantt_tasks, depends_on_id → gantt_tasks,
                     UNIQUE(task_id, depends_on_id))
+capacity_entries (id, session_id → sessions, sprint_name, ref_velocity,
+                  members JSONB, suggested, created_at)
 ```
 
 Une seule table `sessions` pour tout le hub (`tool` = `poker` / `retro` /
-`daily` / `kanban` / `velocity` / `okr` / `gantt`), avec une ou deux tables
-de résultats par outil. Ces données ne sont plus exposées via HTTP (voir
-plus haut), mais `db.getSession(id)` reste disponible côté serveur pour
-un futur usage interne (export, admin).
+`daily` / `kanban` / `velocity` / `okr` / `gantt` / `capacity`), avec une ou
+deux tables de résultats par outil. Ces données ne sont plus exposées via
+HTTP (voir plus haut), mais `db.getSession(id)` reste disponible côté
+serveur pour un futur usage interne (export, admin).
 
 ## Dev local
 
@@ -293,9 +326,13 @@ ajoute dans `vite.config.js` (section `server.proxy`) :
 
 ## Pistes pour la suite
 
-Les 7 outils du hub sont maintenant tous fonctionnels. Pistes pour aller
+Les 8 outils du hub sont maintenant tous fonctionnels. Pistes pour aller
 plus loin :
 
+- **Capacité ↔ Vélocité** : lier réellement les deux tableaux (récupérer
+  automatiquement la vélocité moyenne d'un tableau de Vélocité existant
+  plutôt que de la ressaisir à la main) — la première vraie référence
+  inter-outils du hub, à faire si le besoin se confirme.
 - **Gantt : dates calendaires réelles** : remplacer les jours relatifs
   (J0, J1…) par de vraies dates, avec gestion des week-ends/jours fériés —
   complexifie le calcul mais rapproche l'outil d'un vrai planning projet.
@@ -305,8 +342,6 @@ plus loin :
   l'interaction serait à ajouter.
 - **Gantt ↔ Kanban** : lier une tâche du Gantt à une carte Kanban pour
   suivre son avancement réel (pas seulement planifié).
-- **Vélocité ↔ Poker** : relier automatiquement les points estimés en
-  Poker à un sprint de Vélocité pour éviter la ressaisie manuelle.
 - **OKR : historique de progression** : actuellement seule la valeur
   courante de chaque résultat clé est gardée ; une table `okr_history`
   (snapshot horodaté à chaque mise à jour) permettrait un graphique
@@ -314,6 +349,6 @@ plus loin :
 - **Rétro : plan d'action** : transformer les notes les plus votées en
   actions assignées (table `retro_actions`), rappelées à la rétro suivante.
 - **Comptes / espaces d'équipe** : à ce stade, un simple pseudo suffit ;
-  regrouper Kanban + Vélocité + OKR + Gantt d'une même équipe sous un
-  espace partagé serait la vraie marche vers du "Jira-like" — mais demande
-  une vraie notion de compte, à ne faire que si le besoin se confirme.
+  regrouper Kanban + Vélocité + OKR + Gantt + Capacité d'une même équipe
+  sous un espace partagé serait la vraie marche vers du "Jira-like" — mais
+  demande une vraie notion de compte, à ne faire que si le besoin se confirme.

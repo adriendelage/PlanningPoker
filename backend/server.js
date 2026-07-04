@@ -302,6 +302,36 @@ function broadcastGantt(id) {
 }
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══ Planificateur de capacité ═══════════════════════════════════════════════
+// Même famille que Kanban/Vélocité/OKR/Gantt : outil permanent, base = source
+// de vérité. Le calcul (moyenne de disponibilité × vélocité de référence)
+// est fait ici, côté serveur, plutôt que côté client comme pour le CPM du
+// Gantt — c'est une simple moyenne, pas un algorithme partagé qui mérite
+// d'être isolé dans son propre module, et ça garantit que la valeur
+// enregistrée en base est celle qui a été calculée au moment de l'ajout.
+
+let capacityBoards = {};
+
+async function ensureCapacity(id) {
+  if (capacityBoards[id]) return capacityBoards[id];
+  const board = await db.capacityLoadBoard(id);
+  if (board) capacityBoards[id] = board;
+  return capacityBoards[id] || null;
+}
+
+function broadcastCapacity(id) {
+  const c = capacityBoards[id];
+  if (!c) return;
+  io.to("cap:" + id).emit("capacity:state", { name: c.name, entries: c.entries });
+}
+
+function computeSuggestedCapacity(refVelocity, members) {
+  if (members.length === 0) return 0;
+  const avgAvailability = members.reduce((sum, m) => sum + m.availability, 0) / members.length;
+  return Math.round(refVelocity * (avgAvailability / 100));
+}
+// ═══════════════════════════════════════════════════════════════════════════════
+
 io.on("connection", socket => {
 
   socket.on("session:create", (data, cb) => {
@@ -845,6 +875,59 @@ io.on("connection", socket => {
     g.tasks.forEach(t => { t.dependsOn = t.dependsOn.filter(d => d !== taskId); });
     broadcastGantt(id);
     db.ganttDeleteTask(taskId).catch(e => console.error("DB ganttDeleteTask:", e.message));
+  });
+
+  // ─── Événements Planificateur de capacité ──────────────────────────────────
+
+  socket.on("capacity:create", (data, cb) => {
+    const id = Math.random().toString(36).substring(2, 8);
+    capacityBoards[id] = { name: data.name || null, entries: [] };
+    socket.join("cap:" + id);
+    cb(id);
+
+    db.createSession({
+      id, name: data.name, hostName: data.hostName, tool: "capacity", taskCount: 0
+    }).catch(e => console.error("DB createSession:", e.message));
+  });
+
+  socket.on("capacity:open", async ({ id }) => {
+    const c = await ensureCapacity(id).catch(() => null);
+    if (!c) return socket.emit("capacity:notfound");
+    socket.join("cap:" + id);
+    socket.emit("capacity:state", { name: c.name, entries: c.entries });
+  });
+
+  socket.on("capacity:entry:add", async ({ id, sprintName, refVelocity, members }) => {
+    const c = capacityBoards[id];
+    const name = String(sprintName || "").trim().slice(0, 100);
+    const ref = Math.max(0, Math.min(9999, parseInt(refVelocity) || 0));
+    if (!c || !name) return;
+    const cleanMembers = Array.isArray(members)
+      ? members
+          .map(m => ({
+            name: String(m.name || "").trim().slice(0, 60),
+            availability: Math.max(0, Math.min(100, parseInt(m.availability) || 0)),
+          }))
+          .filter(m => m.name)
+          .slice(0, 30) // limite raisonnable, évite un abus de la taille du JSONB
+      : [];
+    const suggested = computeSuggestedCapacity(ref, cleanMembers);
+    let entryId = null;
+    try { entryId = await db.capacityAddEntry(id, name, ref, cleanMembers, suggested); }
+    catch (e) { console.error("DB capacityAddEntry:", e.message); }
+    if (entryId == null) entryId = "m" + Date.now(); // mode mémoire
+    c.entries.push({ id: entryId, sprintName: name, refVelocity: ref, members: cleanMembers, suggested });
+    broadcastCapacity(id);
+  });
+
+  socket.on("capacity:entry:delete", ({ id, entryId }) => {
+    const c = capacityBoards[id];
+    if (!c) return;
+    const idx = c.entries.findIndex(e => e.id === entryId);
+    if (idx === -1) return;
+    c.entries.splice(idx, 1);
+    broadcastCapacity(id);
+    db.capacityDeleteEntry(id, entryId).catch(e => console.error("DB capacityDeleteEntry:", e.message));
   });
 
   socket.on("disconnect", () => {
