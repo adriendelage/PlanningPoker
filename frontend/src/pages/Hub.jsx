@@ -30,16 +30,18 @@ const TOOLS = [
     name: "Daily Timer",
     desc: "Temps de parole équitable pour le stand-up : rotation des participants et chrono partagé.",
     accent: "#fee440",
-    active: false,
+    path: "/daily",
+    active: true,
   },
   {
     id: "kanban",
     icon: "📋",
     suit: "♣",
     name: "Kanban léger",
-    desc: "Un tableau simple pour suivre le sprint : To do, In progress, Done. Sans la lourdeur de Jira.",
+    desc: "Un tableau permanent pour suivre le sprint : À faire, En cours, Terminé. Sans la lourdeur de Jira.",
     accent: "#9b5de5",
-    active: false,
+    path: "/kanban",
+    active: true,
   },
 ];
 
@@ -231,8 +233,7 @@ export default function Hub() {
         )}
 
         <footer style={{ textAlign: "center", marginTop: 56, color: "#444", fontSize: 13 }}>
-          Agile Toolbox — open source ·{" "}
-          <a href="https://github.com/adriendelage/PlanningPoker" style={{ color: "#555" }}>GitHub</a>
+          Outils développés par Mr1Dridri
         </footer>
       </div>
     </div>

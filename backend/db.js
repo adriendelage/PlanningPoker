@@ -55,6 +55,21 @@ async function init() {
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS daily_times (
+      id           SERIAL PRIMARY KEY,
+      session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      name         TEXT NOT NULL,
+      seconds_used INT NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS kanban_cards (
+      id          SERIAL PRIMARY KEY,
+      session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      column_name TEXT NOT NULL,
+      title       TEXT NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions (created_at DESC);
   `);
   console.log("✅ Base de données initialisée");
@@ -110,6 +125,75 @@ async function saveRetroNotes(sessionId, notes) {
   }
 }
 
+async function saveDailyTimes(sessionId, times) {
+  if (!enabled() || times.length === 0) return;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM daily_times WHERE session_id = $1`, [sessionId]);
+    for (const t of times) {
+      await client.query(
+        `INSERT INTO daily_times (session_id, name, seconds_used) VALUES ($1, $2, $3)`,
+        [sessionId, t.name, t.seconds]
+      );
+    }
+    await client.query(
+      `UPDATE sessions SET task_count = $2 WHERE id = $1`,
+      [sessionId, times.length]
+    );
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+// ── Kanban : la base est la source de vérité ────────────────────────────────
+
+async function kanbanAddCard(sessionId, column, title) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO kanban_cards (session_id, column_name, title)
+     VALUES ($1, $2, $3) RETURNING id`,
+    [sessionId, column, title]
+  );
+  await pool.query(
+    `UPDATE sessions SET task_count = (SELECT COUNT(*) FROM kanban_cards WHERE session_id = $1) WHERE id = $1`,
+    [sessionId]
+  );
+  return rows[0].id;
+}
+
+async function kanbanMoveCard(cardId, column) {
+  if (!enabled()) return;
+  await pool.query(`UPDATE kanban_cards SET column_name = $2 WHERE id = $1`, [cardId, column]);
+}
+
+async function kanbanDeleteCard(sessionId, cardId) {
+  if (!enabled()) return;
+  await pool.query(`DELETE FROM kanban_cards WHERE id = $1`, [cardId]);
+  await pool.query(
+    `UPDATE sessions SET task_count = (SELECT COUNT(*) FROM kanban_cards WHERE session_id = $1) WHERE id = $1`,
+    [sessionId]
+  );
+}
+
+async function kanbanLoadBoard(id) {
+  if (!enabled()) return null;
+  const s = await pool.query(`SELECT * FROM sessions WHERE id = $1 AND tool = 'kanban'`, [id]);
+  if (s.rows.length === 0) return null;
+  const c = await pool.query(
+    `SELECT id, column_name, title FROM kanban_cards WHERE session_id = $1 ORDER BY id`,
+    [id]
+  );
+  return {
+    name: s.rows[0].name,
+    cards: c.rows.map(r => ({ id: r.id, column: r.column_name, title: r.title }))
+  };
+}
+
 async function finishSession(id) {
   if (!enabled()) return;
   await pool.query(
@@ -151,6 +235,18 @@ async function getSession(id) {
       [id]
     );
     results = r.rows;
+  } else if (session.tool === "daily") {
+    const r = await pool.query(
+      `SELECT name, seconds_used FROM daily_times WHERE session_id = $1 ORDER BY id`,
+      [id]
+    );
+    results = r.rows;
+  } else if (session.tool === "kanban") {
+    const r = await pool.query(
+      `SELECT id, column_name, title FROM kanban_cards WHERE session_id = $1 ORDER BY id`,
+      [id]
+    );
+    results = r.rows;
   } else {
     const r = await pool.query(
       `SELECT task_index, task, median, votes
@@ -162,4 +258,8 @@ async function getSession(id) {
   return { ...session, results };
 }
 
-module.exports = { init, enabled, createSession, saveResult, saveRetroNotes, finishSession, listSessions, getSession };
+module.exports = {
+  init, enabled, createSession, saveResult, saveRetroNotes, saveDailyTimes,
+  kanbanAddCard, kanbanMoveCard, kanbanDeleteCard, kanbanLoadBoard,
+  finishSession, listSessions, getSession
+};
