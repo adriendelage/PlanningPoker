@@ -130,6 +130,77 @@ async function init() {
       created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    -- Sondage rapide : éphémère comme le Poker (snapshot en base à la clôture)
+    CREATE TABLE IF NOT EXISTS poll_results (
+      id           SERIAL PRIMARY KEY,
+      session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      option_text  TEXT NOT NULL,
+      vote_count   INT NOT NULL DEFAULT 0
+    );
+
+    -- Objectif de sprint : permanent, historique d'objectifs archivés
+    CREATE TABLE IF NOT EXISTS sprint_goals (
+      id          SERIAL PRIMARY KEY,
+      session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      sprint_name TEXT NOT NULL,
+      goal_text   TEXT NOT NULL,
+      votes       JSONB NOT NULL DEFAULT '[]',
+      achieved    BOOLEAN,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- Definition of Done : checklist partagée et réinitialisable
+    CREATE TABLE IF NOT EXISTS dod_items (
+      id          SERIAL PRIMARY KEY,
+      session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      text        TEXT NOT NULL,
+      checked     BOOLEAN NOT NULL DEFAULT false,
+      position    INT NOT NULL DEFAULT 0,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- Journal de décisions (ADR léger)
+    CREATE TABLE IF NOT EXISTS decisions (
+      id          SERIAL PRIMARY KEY,
+      session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      title       TEXT NOT NULL,
+      context     TEXT NOT NULL DEFAULT '',
+      decided_by  TEXT,
+      status      TEXT NOT NULL DEFAULT 'acceptée',
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- Post-mortem d'incident : un tableau = un incident (relation 1:1 avec sessions)
+    CREATE TABLE IF NOT EXISTS postmortems (
+      session_id  TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+      timeline    JSONB NOT NULL DEFAULT '[]',
+      root_cause  TEXT NOT NULL DEFAULT '',
+      actions     JSONB NOT NULL DEFAULT '[]'
+    );
+
+    -- Suivi de feature flags
+    CREATE TABLE IF NOT EXISTS feature_flags (
+      id           SERIAL PRIMARY KEY,
+      session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      name         TEXT NOT NULL,
+      active       BOOLEAN NOT NULL DEFAULT false,
+      environment  TEXT NOT NULL DEFAULT 'dev',
+      owner        TEXT,
+      notes        TEXT,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- Pouls d'équipe : un check-in par personne et par jour (upsert)
+    CREATE TABLE IF NOT EXISTS pulse_entries (
+      id          SERIAL PRIMARY KEY,
+      session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      name        TEXT NOT NULL,
+      mood        INT NOT NULL,
+      day         DATE NOT NULL DEFAULT CURRENT_DATE,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (session_id, name, day)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions (created_at DESC);
   `);
   console.log("✅ Base de données initialisée");
@@ -481,6 +552,254 @@ async function capacityLoadBoard(id) {
   };
 }
 
+// ── Sondage rapide : éphémère (snapshot à la clôture) ───────────────────────
+
+async function savePollResults(sessionId, options) {
+  if (!enabled() || options.length === 0) return;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM poll_results WHERE session_id = $1`, [sessionId]);
+    for (const o of options) {
+      await client.query(
+        `INSERT INTO poll_results (session_id, option_text, vote_count) VALUES ($1, $2, $3)`,
+        [sessionId, o.text, o.votes]
+      );
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+// ── Objectif de sprint : permanent, historique d'entrées ────────────────────
+
+async function goalAddEntry(sessionId, sprintName, goalText, votes) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO sprint_goals (session_id, sprint_name, goal_text, votes)
+     VALUES ($1, $2, $3, $4) RETURNING id`,
+    [sessionId, sprintName, goalText, JSON.stringify(votes)]
+  );
+  await pool.query(
+    `UPDATE sessions SET task_count = (SELECT COUNT(*) FROM sprint_goals WHERE session_id = $1) WHERE id = $1`,
+    [sessionId]
+  );
+  return rows[0].id;
+}
+
+async function goalSetAchieved(entryId, achieved) {
+  if (!enabled()) return;
+  await pool.query(`UPDATE sprint_goals SET achieved = $2 WHERE id = $1`, [entryId, achieved]);
+}
+
+async function goalDeleteEntry(sessionId, entryId) {
+  if (!enabled()) return;
+  await pool.query(`DELETE FROM sprint_goals WHERE id = $1`, [entryId]);
+  await pool.query(
+    `UPDATE sessions SET task_count = (SELECT COUNT(*) FROM sprint_goals WHERE session_id = $1) WHERE id = $1`,
+    [sessionId]
+  );
+}
+
+async function goalLoadBoard(id) {
+  if (!enabled()) return null;
+  const s = await pool.query(`SELECT * FROM sessions WHERE id = $1 AND tool = 'goal'`, [id]);
+  if (s.rows.length === 0) return null;
+  const r = await pool.query(
+    `SELECT id, sprint_name, goal_text, votes, achieved FROM sprint_goals WHERE session_id = $1 ORDER BY id`,
+    [id]
+  );
+  return {
+    name: s.rows[0].name,
+    entries: r.rows.map(row => ({
+      id: row.id, sprintName: row.sprint_name, goalText: row.goal_text,
+      votes: row.votes, achieved: row.achieved,
+    }))
+  };
+}
+
+// ── Definition of Done : checklist partagée ──────────────────────────────────
+
+async function dodAddItem(sessionId, text) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO dod_items (session_id, text, position)
+     VALUES ($1, $2, (SELECT COALESCE(MAX(position), -1) + 1 FROM dod_items WHERE session_id = $1))
+     RETURNING id`,
+    [sessionId, text]
+  );
+  return rows[0].id;
+}
+
+async function dodToggleItem(itemId, checked) {
+  if (!enabled()) return;
+  await pool.query(`UPDATE dod_items SET checked = $2 WHERE id = $1`, [itemId, checked]);
+}
+
+async function dodDeleteItem(itemId) {
+  if (!enabled()) return;
+  await pool.query(`DELETE FROM dod_items WHERE id = $1`, [itemId]);
+}
+
+async function dodResetAll(sessionId) {
+  if (!enabled()) return;
+  await pool.query(`UPDATE dod_items SET checked = false WHERE session_id = $1`, [sessionId]);
+}
+
+async function dodLoadBoard(id) {
+  if (!enabled()) return null;
+  const s = await pool.query(`SELECT * FROM sessions WHERE id = $1 AND tool = 'dod'`, [id]);
+  if (s.rows.length === 0) return null;
+  const r = await pool.query(
+    `SELECT id, text, checked FROM dod_items WHERE session_id = $1 ORDER BY position, id`,
+    [id]
+  );
+  return { name: s.rows[0].name, items: r.rows };
+}
+
+// ── Journal de décisions (ADR léger) ─────────────────────────────────────────
+
+async function decisionAdd(sessionId, title, context, decidedBy, status) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO decisions (session_id, title, context, decided_by, status)
+     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    [sessionId, title, context, decidedBy, status]
+  );
+  await pool.query(
+    `UPDATE sessions SET task_count = (SELECT COUNT(*) FROM decisions WHERE session_id = $1) WHERE id = $1`,
+    [sessionId]
+  );
+  return rows[0].id;
+}
+
+async function decisionUpdateStatus(decisionId, status) {
+  if (!enabled()) return;
+  await pool.query(`UPDATE decisions SET status = $2 WHERE id = $1`, [decisionId, status]);
+}
+
+async function decisionDelete(sessionId, decisionId) {
+  if (!enabled()) return;
+  await pool.query(`DELETE FROM decisions WHERE id = $1`, [decisionId]);
+  await pool.query(
+    `UPDATE sessions SET task_count = (SELECT COUNT(*) FROM decisions WHERE session_id = $1) WHERE id = $1`,
+    [sessionId]
+  );
+}
+
+async function decisionLoadBoard(id) {
+  if (!enabled()) return null;
+  const s = await pool.query(`SELECT * FROM sessions WHERE id = $1 AND tool = 'decisions'`, [id]);
+  if (s.rows.length === 0) return null;
+  const r = await pool.query(
+    `SELECT id, title, context, decided_by, status, created_at
+     FROM decisions WHERE session_id = $1 ORDER BY created_at DESC`,
+    [id]
+  );
+  return {
+    name: s.rows[0].name,
+    decisions: r.rows.map(row => ({
+      id: row.id, title: row.title, context: row.context,
+      decidedBy: row.decided_by, status: row.status, createdAt: row.created_at,
+    }))
+  };
+}
+
+// ── Post-mortem d'incident : un tableau = un incident ────────────────────────
+
+async function postmortemSave(sessionId, { timeline, rootCause, actions }) {
+  if (!enabled()) return;
+  await pool.query(
+    `INSERT INTO postmortems (session_id, timeline, root_cause, actions)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (session_id) DO UPDATE
+       SET timeline = EXCLUDED.timeline, root_cause = EXCLUDED.root_cause, actions = EXCLUDED.actions`,
+    [sessionId, JSON.stringify(timeline), rootCause, JSON.stringify(actions)]
+  );
+}
+
+async function postmortemLoad(id) {
+  if (!enabled()) return null;
+  const s = await pool.query(`SELECT * FROM sessions WHERE id = $1 AND tool = 'postmortem'`, [id]);
+  if (s.rows.length === 0) return null;
+  const p = await pool.query(`SELECT * FROM postmortems WHERE session_id = $1`, [id]);
+  return {
+    name: s.rows[0].name,
+    timeline: p.rows[0]?.timeline || [],
+    rootCause: p.rows[0]?.root_cause || "",
+    actions: p.rows[0]?.actions || [],
+  };
+}
+
+// ── Suivi de feature flags ───────────────────────────────────────────────────
+
+async function flagAdd(sessionId, name, environment, owner, notes) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO feature_flags (session_id, name, environment, owner, notes)
+     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    [sessionId, name, environment, owner, notes]
+  );
+  return rows[0].id;
+}
+
+async function flagToggle(flagId, active) {
+  if (!enabled()) return;
+  await pool.query(`UPDATE feature_flags SET active = $2 WHERE id = $1`, [flagId, active]);
+}
+
+async function flagUpdate(flagId, { environment, owner, notes }) {
+  if (!enabled()) return;
+  await pool.query(
+    `UPDATE feature_flags SET environment = $2, owner = $3, notes = $4 WHERE id = $1`,
+    [flagId, environment, owner, notes]
+  );
+}
+
+async function flagDelete(flagId) {
+  if (!enabled()) return;
+  await pool.query(`DELETE FROM feature_flags WHERE id = $1`, [flagId]);
+}
+
+async function flagLoadBoard(id) {
+  if (!enabled()) return null;
+  const s = await pool.query(`SELECT * FROM sessions WHERE id = $1 AND tool = 'flags'`, [id]);
+  if (s.rows.length === 0) return null;
+  const r = await pool.query(
+    `SELECT id, name, active, environment, owner, notes FROM feature_flags WHERE session_id = $1 ORDER BY id`,
+    [id]
+  );
+  return { name: s.rows[0].name, flags: r.rows };
+}
+
+// ── Pouls d'équipe : un check-in par personne et par jour ────────────────────
+
+async function pulseCheckin(sessionId, name, mood) {
+  if (!enabled()) return;
+  await pool.query(
+    `INSERT INTO pulse_entries (session_id, name, mood, day)
+     VALUES ($1, $2, $3, CURRENT_DATE)
+     ON CONFLICT (session_id, name, day) DO UPDATE SET mood = EXCLUDED.mood`,
+    [sessionId, name, mood]
+  );
+}
+
+async function pulseLoadBoard(id) {
+  if (!enabled()) return null;
+  const s = await pool.query(`SELECT * FROM sessions WHERE id = $1 AND tool = 'pulse'`, [id]);
+  if (s.rows.length === 0) return null;
+  const r = await pool.query(
+    `SELECT name, mood, to_char(day, 'YYYY-MM-DD') AS day
+     FROM pulse_entries WHERE session_id = $1 ORDER BY day, id`,
+    [id]
+  );
+  return { name: s.rows[0].name, entries: r.rows };
+}
+
 async function finishSession(id) {
   if (!enabled()) return;
   await pool.query(
@@ -567,6 +886,45 @@ async function getSession(id) {
       [id]
     );
     results = r.rows;
+  } else if (session.tool === "poll") {
+    const r = await pool.query(
+      `SELECT option_text, vote_count FROM poll_results WHERE session_id = $1`,
+      [id]
+    );
+    results = r.rows;
+  } else if (session.tool === "goal") {
+    const r = await pool.query(
+      `SELECT sprint_name, goal_text, votes, achieved FROM sprint_goals WHERE session_id = $1 ORDER BY id`,
+      [id]
+    );
+    results = r.rows;
+  } else if (session.tool === "dod") {
+    const r = await pool.query(
+      `SELECT text, checked FROM dod_items WHERE session_id = $1 ORDER BY position, id`,
+      [id]
+    );
+    results = r.rows;
+  } else if (session.tool === "decisions") {
+    const r = await pool.query(
+      `SELECT title, context, decided_by, status FROM decisions WHERE session_id = $1 ORDER BY created_at DESC`,
+      [id]
+    );
+    results = r.rows;
+  } else if (session.tool === "postmortem") {
+    const p = await pool.query(`SELECT * FROM postmortems WHERE session_id = $1`, [id]);
+    results = p.rows;
+  } else if (session.tool === "flags") {
+    const r = await pool.query(
+      `SELECT name, active, environment, owner, notes FROM feature_flags WHERE session_id = $1 ORDER BY id`,
+      [id]
+    );
+    results = r.rows;
+  } else if (session.tool === "pulse") {
+    const r = await pool.query(
+      `SELECT name, mood, to_char(day, 'YYYY-MM-DD') AS day FROM pulse_entries WHERE session_id = $1 ORDER BY day`,
+      [id]
+    );
+    results = r.rows;
   } else {
     const r = await pool.query(
       `SELECT task_index, task, median, votes
@@ -586,5 +944,12 @@ module.exports = {
   okrDeleteKeyResult, okrLoadBoard,
   ganttAddTask, ganttUpdateTask, ganttDeleteTask, ganttSetDependencies, ganttLoadBoard,
   capacityAddEntry, capacityDeleteEntry, capacityLoadBoard,
+  savePollResults,
+  goalAddEntry, goalSetAchieved, goalDeleteEntry, goalLoadBoard,
+  dodAddItem, dodToggleItem, dodDeleteItem, dodResetAll, dodLoadBoard,
+  decisionAdd, decisionUpdateStatus, decisionDelete, decisionLoadBoard,
+  postmortemSave, postmortemLoad,
+  flagAdd, flagToggle, flagUpdate, flagDelete, flagLoadBoard,
+  pulseCheckin, pulseLoadBoard,
   finishSession, listSessions, getSession
 };

@@ -83,28 +83,125 @@ const TOOLS = [
     path: "/capacity",
     active: true,
   },
+  {
+    id: "poll",
+    icon: "🗳️",
+    suit: "?",
+    name: "Sondage rapide",
+    desc: "Une décision d'équipe en direct : question, options, vote instantané.",
+    accent: "#118ab2",
+    path: "/poll",
+    active: true,
+  },
+  {
+    id: "goal",
+    icon: "🚀",
+    suit: "↗",
+    name: "Objectif de sprint",
+    desc: "Un objectif clair par sprint, une confiance mesurée, un historique dans le temps.",
+    accent: "#ef476f",
+    path: "/goal",
+    active: true,
+  },
+  {
+    id: "dod",
+    icon: "✅",
+    suit: "☑",
+    name: "Definition of Done",
+    desc: "Une checklist partagée, à cocher avant de considérer une story terminée.",
+    accent: "#8ac926",
+    path: "/dod",
+    active: true,
+  },
+  {
+    id: "decisions",
+    icon: "📜",
+    suit: "§",
+    name: "Journal de décisions",
+    desc: "Quoi, pourquoi, par qui — pour ne plus se demander pourquoi six mois plus tard.",
+    accent: "#ffca3a",
+    path: "/decisions",
+    active: true,
+  },
+  {
+    id: "postmortem",
+    icon: "🩹",
+    suit: "!",
+    name: "Post-mortem d'incident",
+    desc: "Chronologie, cause racine, actions correctives — un tableau par incident.",
+    accent: "#c1121f",
+    path: "/postmortem",
+    active: true,
+  },
+  {
+    id: "flags",
+    icon: "🚩",
+    suit: "⚑",
+    name: "Suivi de feature flags",
+    desc: "Qui a activé quoi, où — pour ne plus perdre le fil des interrupteurs du code.",
+    accent: "#6a4c93",
+    path: "/flags",
+    active: true,
+  },
+  {
+    id: "pulse",
+    icon: "💓",
+    suit: "♡",
+    name: "Pouls d'équipe",
+    desc: "Un check-in d'humeur en un clic, chaque jour, avec la tendance dans le temps.",
+    accent: "#ff6b9d",
+    path: "/pulse",
+    active: true,
+  },
+  {
+    id: "wheel",
+    icon: "🎡",
+    suit: "○",
+    name: "Roue de décision",
+    desc: "Qui anime le daily ? Qui fait la démo ? Laisse le hasard trancher, sans rien enregistrer.",
+    accent: "#00f5d4",
+    path: "/wheel",
+    active: true,
+  },
 ];
 
 // Où renvoyer l'utilisateur selon l'outil et son rôle lors de sa dernière visite.
-// Kanban, Vélocité et OKR n'ont pas d'étape « rejoindre » : on rouvre
-// toujours le tableau directement, quel que soit le rôle.
-const PERMANENT_TOOLS = ["kanban", "velocity", "okr", "gantt", "capacity"];
+// Trois catégories de comportement :
+// - JOIN_TOOLS : session éphémère avec une étape "rejoindre" (saisie du nom)
+// - HOST_AWARE_NO_JOIN : pas d'étape de jointure (vote anonyme), mais l'hôte
+//   garde des actions spécifiques (ex: clôturer le sondage)
+// - le reste : tableaux permanents, aucune distinction de rôle dans l'UI,
+//   on rouvre toujours le même lien
+const JOIN_TOOLS = ["poker", "retro", "daily"];
+const HOST_AWARE_NO_JOIN = ["poll"];
+
 function resolveLink(entry) {
   const { id, tool, role } = entry;
-  if (PERMANENT_TOOLS.includes(tool)) return `/${tool}/${id}`;
-  if (role === "host") return `/${tool}/${id}?host=true`;
-  return `/${tool}/join/${id}`;
+  if (JOIN_TOOLS.includes(tool)) {
+    return role === "host" ? `/${tool}/${id}?host=true` : `/${tool}/join/${id}`;
+  }
+  if (HOST_AWARE_NO_JOIN.includes(tool)) {
+    return role === "host" ? `/${tool}/${id}?host=true` : `/${tool}/${id}`;
+  }
+  return `/${tool}/${id}`;
 }
 
 const TOOL_META = {
-  poker:    { icon: "🃏", accent: "#00f5d4" },
-  retro:    { icon: "🔄", accent: "#f15bb5" },
-  daily:    { icon: "⏱️", accent: "#fee440" },
-  kanban:   { icon: "📋", accent: "#9b5de5" },
-  velocity: { icon: "📈", accent: "#00bbf9" },
-  okr:      { icon: "🎯", accent: "#ff9f1c" },
-  gantt:    { icon: "📅", accent: "#e63946" },
-  capacity: { icon: "🧮", accent: "#06d6a0" },
+  poker:      { icon: "🃏", accent: "#00f5d4" },
+  retro:      { icon: "🔄", accent: "#f15bb5" },
+  daily:      { icon: "⏱️", accent: "#fee440" },
+  kanban:     { icon: "📋", accent: "#9b5de5" },
+  velocity:   { icon: "📈", accent: "#00bbf9" },
+  okr:        { icon: "🎯", accent: "#ff9f1c" },
+  gantt:      { icon: "📅", accent: "#e63946" },
+  capacity:   { icon: "🧮", accent: "#06d6a0" },
+  poll:       { icon: "🗳️", accent: "#118ab2" },
+  goal:       { icon: "🚀", accent: "#ef476f" },
+  dod:        { icon: "✅", accent: "#8ac926" },
+  decisions:  { icon: "📜", accent: "#ffca3a" },
+  postmortem: { icon: "🩹", accent: "#c1121f" },
+  flags:      { icon: "🚩", accent: "#6a4c93" },
+  pulse:      { icon: "💓", accent: "#ff6b9d" },
 };
 
 function fmtDate(ts) {

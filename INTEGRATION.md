@@ -1,10 +1,13 @@
 # 🧰 Agile Toolbox — Guide d'intégration
 
 Extension de Planning Poker Pro en boîte à outils complète : hub d'accueil,
-persistance PostgreSQL, historique privé (local au navigateur), et 7 nouveaux
-outils — **Rétrospective**, **Daily Timer**, **Kanban léger**,
+persistance PostgreSQL, historique privé (local au navigateur), et 14
+nouveaux outils — **Rétrospective**, **Daily Timer**, **Kanban léger**,
 **Suivi de vélocité**, **OKR léger**, **Rétro-planning** (Gantt + chemin
-critique) et **Planificateur de capacité**.
+critique), **Planificateur de capacité**, **Sondage rapide**, **Objectif
+de sprint**, **Definition of Done**, **Journal de décisions**,
+**Post-mortem d'incident**, **Suivi de feature flags**, **Pouls d'équipe**,
+et la **Roue de décision** (100 % client, sans backend).
 
 ## Fichiers à intégrer dans ton repo
 
@@ -35,6 +38,21 @@ critique) et **Planificateur de capacité**.
 | `frontend/src/pages/Gantt.jsx` | **Nouveau** | Graphique de Gantt (SVG fait main) + tâches/dépendances + chemin critique |
 | `frontend/src/pages/CapacityHome.jsx` | **Nouveau** | Création d'un tableau de capacité |
 | `frontend/src/pages/Capacity.jsx` | **Nouveau** | Planification de sprint : disponibilité par membre, capacité suggérée, historique |
+| `frontend/src/pages/PollHome.jsx` | **Nouveau** | Création d'un sondage (question + options) |
+| `frontend/src/pages/Poll.jsx` | **Nouveau** | Vote en direct, tally live, clôture par l'hôte |
+| `frontend/src/pages/GoalHome.jsx` | **Nouveau** | Création d'un tableau d'objectifs de sprint |
+| `frontend/src/pages/Goal.jsx` | **Nouveau** | Objectif + votes de confiance + historique atteint/manqué |
+| `frontend/src/pages/DodHome.jsx` | **Nouveau** | Création d'une Definition of Done |
+| `frontend/src/pages/Dod.jsx` | **Nouveau** | Checklist partagée, cochable, réinitialisable |
+| `frontend/src/pages/DecisionsHome.jsx` | **Nouveau** | Création d'un journal de décisions |
+| `frontend/src/pages/Decisions.jsx` | **Nouveau** | ADR léger : titre, contexte, statut (proposée/acceptée/obsolète) |
+| `frontend/src/pages/PostmortemHome.jsx` | **Nouveau** | Création d'un post-mortem (un tableau = un incident) |
+| `frontend/src/pages/Postmortem.jsx` | **Nouveau** | Chronologie, cause racine, actions correctives |
+| `frontend/src/pages/FlagsHome.jsx` | **Nouveau** | Création d'un suivi de feature flags |
+| `frontend/src/pages/Flags.jsx` | **Nouveau** | Liste de flags avec switch, environnement, propriétaire |
+| `frontend/src/pages/PulseHome.jsx` | **Nouveau** | Création d'un tableau de pouls d'équipe |
+| `frontend/src/pages/Pulse.jsx` | **Nouveau** | Check-in d'humeur quotidien + courbe de tendance (SVG fait main) |
+| `frontend/src/pages/Wheel.jsx` | **Nouveau** | Roue de décision — 100 % client, aucun appel réseau |
 
 ⚠️ **`frontend/src/api.js` doit être supprimé de ton repo** — il n'est plus
 utilisé par rien (le hub ne fait plus aucun appel réseau pour son historique).
@@ -249,6 +267,116 @@ suivant.
 membres max par entrée, noms vides filtrés), `capacity:entry:delete`.
 Reprise après redémarrage vérifiée comme pour les autres outils permanents.
 
+## L'outil Sondage rapide
+
+Le seul des 15 outils qui reste **éphémère mais sans étape de jointure** :
+comme le vote est anonyme (juste un tally, aucun nom affiché), il n'y a
+pas besoin de demander un prénom pour participer — le lien mène
+directement au vote. Chaque participant reçoit un état personnalisé
+(`myVote`, `isHost`) via un broadcast **par participant**, sur le même
+principe que la Rétro.
+
+L'hôte (premier connecté) peut clôturer le sondage, ce qui fige les
+résultats et déclenche un snapshot en base (`poll_results`), puis un
+nettoyage mémoire après 24h — exactement le cycle de vie du Poker.
+
+Événements : `poll:create`, `poll:join`, `poll:state` (reconnexion, avec
+rebind de l'hôte), `poll:vote` (un participant peut changer d'avis tant
+que le sondage n'est pas clos), `poll:close` (hôte uniquement).
+
+## L'outil Objectif de sprint
+
+Permanent, sur le modèle de la Vélocité et de la Capacité : à chaque
+sprint, on formule l'objectif en une phrase et on recueille la confiance
+(1 à 5) de chaque membre — saisie manuelle via une liste nom + niveau,
+pas de vote en direct par identité (cohérent avec Capacité, pas
+d'authentification dans le hub). Chaque entrée archivée peut ensuite être
+marquée « atteint » ou « manqué », ce qui donne un historique utile en
+rétro de sprint suivante.
+
+Événements : `goal:create`, `goal:open`, `goal:entry:add` (votes bornés
+1-5, 30 max), `goal:entry:achieved` (true/false/null), `goal:entry:delete`.
+
+## L'outil Definition of Done
+
+Le plus simple des 15 : une checklist partagée, cochable par n'importe qui
+avec le lien, avec un bouton « Réinitialiser » qui décoche tout sans
+supprimer les critères — pensé pour être remis à zéro à chaque nouvelle
+story plutôt que recréé à chaque fois.
+
+Événements : `dod:create`, `dod:open`, `dod:item:add`, `dod:item:toggle`,
+`dod:item:delete`, `dod:reset` (décoche tous les items sans les supprimer).
+
+## L'outil Journal de décisions
+
+Un ADR (Architecture Decision Record) léger : titre, contexte, décidé par
+qui, et un statut parmi `proposée` / `acceptée` / `obsolète`. Les décisions
+les plus récentes remontent en haut (`ORDER BY created_at DESC`).
+
+Événements : `decisions:create`, `decisions:open`, `decisions:add`,
+`decisions:status` (les 3 valeurs de statut sont validées côté serveur),
+`decisions:delete`.
+
+## L'outil Post-mortem d'incident
+
+Contrairement aux autres outils permanents (une session = un tableau
+réutilisable indéfiniment), ici **une session = un incident** — la
+relation avec `postmortems` est 1:1 (`session_id` est la clé primaire de
+la table, pas une clé étrangère classique). Trois sections indépendantes :
+chronologie (liste d'événements horodatés), cause racine (un texte libre,
+enregistré `onBlur` plutôt qu'à chaque frappe), actions correctives
+(checklist avec cases à cocher).
+
+Simplification technique à connaître : la chronologie et les actions sont
+stockées en JSONB et réécrites **en entier** à chaque modification
+(`postmortemSave` fait un upsert de tout l'objet), plutôt que des lignes
+SQL individuelles comme pour le Kanban. C'est plus simple à coder et
+largement suffisant pour un outil à faible concurrence (une poignée de
+personnes qui complètent un post-mortem ensemble, pas des dizaines en
+simultané) ; l'inconvénient est que deux modifications strictement
+simultanées sur des champs différents pourraient s'écraser l'une l'autre
+dans de rares cas — acceptable ici, mais à garder en tête si l'usage
+change.
+
+Événements : `postmortem:create`, `postmortem:open`,
+`postmortem:timeline:add/delete`, `postmortem:rootcause:update`,
+`postmortem:action:add/toggle/delete`.
+
+## L'outil Suivi de feature flags
+
+Une liste de flags avec un switch actif/inactif, un environnement
+(dev/staging/prod), un propriétaire et des notes libres — l'édition de
+ces trois derniers champs se fait via un petit formulaire repliable par
+ligne plutôt qu'un formulaire toujours visible, pour garder la liste
+lisible quand elle grossit.
+
+Événements : `flags:create`, `flags:open`, `flags:add`, `flags:toggle`,
+`flags:update` (environnement/propriétaire/notes), `flags:delete`.
+
+## L'outil Pouls d'équipe
+
+Un check-in d'humeur (1 à 5, avec emojis) par personne et par jour —
+`UNIQUE(session_id, name, day)` en base avec un `ON CONFLICT DO UPDATE`
+: si quelqu'un refait son check-in dans la même journée, ça met à jour
+sa valeur plutôt que d'en créer une deuxième (vérifié par test). La
+tendance est affichée comme une courbe (moyenne du jour), en SVG fait
+main sur le même principe que le graphique de Vélocité.
+
+Événements : `pulse:create`, `pulse:open`, `pulse:checkin` (upsert
+serveur + mémoire).
+
+## L'outil Roue de décision
+
+Le seul outil qui n'a **ni backend, ni base de données, ni Socket.IO** :
+une simple page React avec état local (liste de noms, angle de rotation),
+une animation CSS (`transition: transform`) calculée pour faire
+correspondre l'angle final à un gagnant tiré aléatoirement. Comme il n'y
+a pas de session à créer, il n'y a pas de lien à partager ni d'entrée dans
+« Mes sessions » — c'est un outil qu'on utilise sur son propre écran
+pendant une réunion, pas quelque chose qu'on revient consulter plus tard.
+
+Aucun événement serveur — tout se passe dans `Wheel.jsx`.
+
 ## Base de données sur Railway
 
 1. Dans ton projet Railway : **+ New → Database → PostgreSQL**
@@ -256,14 +384,17 @@ Reprise après redémarrage vérifiée comme pour les autres outils permanents.
    → sélectionner `DATABASE_URL` du service Postgres
    (Railway injecte l'URL interne `postgres.railway.internal`, sans SSL —
    `db.js` le détecte automatiquement)
-3. Redéployer. Le schéma (`sessions`, `poker_results`) se crée tout seul
-   au premier démarrage — pas de migration manuelle.
+3. Redéployer. Le schéma (`sessions`, `poker_results`, etc.) se crée tout
+   seul au premier démarrage — pas de migration manuelle.
 
 **Sans `DATABASE_URL`** (dev local par exemple), le serveur démarre normalement
-en mode mémoire, comme avant. Les outils éphémères (Poker, Rétro, Daily)
+en mode mémoire, comme avant. Les outils éphémères (Poker, Rétro, Daily, Sondage)
 fonctionnent normalement mais sans persistance ; les outils permanents
-(Kanban, Vélocité, OKR) répondent `*:notfound` à la réouverture d'un lien
-existant, puisqu'ils dépendent entièrement de la base pour se recharger.
+(Kanban, Vélocité, OKR, Gantt, Capacité, Objectif de sprint, DoD, Journal
+de décisions, Post-mortem, Feature flags, Pouls d'équipe) répondent
+`*:notfound` à la réouverture d'un lien existant, puisqu'ils dépendent
+entièrement de la base pour se recharger. La Roue de décision n'est
+concernée par rien de tout ça, elle n'a pas de backend.
 
 ## API REST
 
@@ -292,13 +423,27 @@ gantt_dependencies (id, task_id → gantt_tasks, depends_on_id → gantt_tasks,
                     UNIQUE(task_id, depends_on_id))
 capacity_entries (id, session_id → sessions, sprint_name, ref_velocity,
                   members JSONB, suggested, created_at)
+poll_results    (id, session_id → sessions, option_text, vote_count)
+sprint_goals    (id, session_id → sessions, sprint_name, goal_text,
+                 votes JSONB, achieved BOOLEAN, created_at)
+dod_items       (id, session_id → sessions, text, checked, position, created_at)
+decisions       (id, session_id → sessions, title, context, decided_by,
+                 status, created_at)
+postmortems     (session_id → sessions [clé primaire], timeline JSONB,
+                 root_cause, actions JSONB)
+feature_flags   (id, session_id → sessions, name, active, environment,
+                 owner, notes, created_at)
+pulse_entries   (id, session_id → sessions, name, mood, day,
+                 UNIQUE(session_id, name, day))
 ```
 
 Une seule table `sessions` pour tout le hub (`tool` = `poker` / `retro` /
-`daily` / `kanban` / `velocity` / `okr` / `gantt` / `capacity`), avec une ou
-deux tables de résultats par outil. Ces données ne sont plus exposées via
-HTTP (voir plus haut), mais `db.getSession(id)` reste disponible côté
-serveur pour un futur usage interne (export, admin).
+`daily` / `kanban` / `velocity` / `okr` / `gantt` / `capacity` / `poll` /
+`goal` / `dod` / `decisions` / `postmortem` / `flags` / `pulse`), avec une
+ou deux tables de résultats par outil. La Roue de décision n'a pas de
+ligne dans `sessions` — elle n'a pas de backend du tout. Ces données ne
+sont plus exposées via HTTP (voir plus haut), mais `db.getSession(id)`
+reste disponible côté serveur pour un futur usage interne (export, admin).
 
 ## Dev local
 
@@ -322,12 +467,19 @@ ajoute dans `vite.config.js` (section `server.proxy`) :
 - L'init de la base fait 5 tentatives espacées de 3 s (utile si Postgres
   démarre après l'app), puis bascule en mode mémoire sans bloquer le serveur.
 - Toutes les écritures DB sont asynchrones et n'impactent jamais le temps réel.
-- Le snapshot de rétro est transactionnel et idempotent (DELETE + INSERT).
+- Le snapshot de rétro et le snapshot de sondage sont transactionnels et
+  idempotents (DELETE + INSERT).
+- Le Post-mortem réécrit tout son état JSONB à chaque modification plutôt
+  que des lignes SQL individuelles (voir la section dédiée) — un choix
+  pragmatique pour un outil à faible concurrence, à revoir si l'usage change.
+- Le Pouls d'équipe utilise un `UNIQUE(session_id, name, day)` avec
+  `ON CONFLICT DO UPDATE` pour éviter les doublons de check-in — vérifié
+  par test qu'un second check-in le même jour met à jour plutôt que dupliquer.
 
 ## Pistes pour la suite
 
-Les 8 outils du hub sont maintenant tous fonctionnels. Pistes pour aller
-plus loin :
+Les 15 outils du hub sont maintenant tous fonctionnels (14 avec backend +
+la Roue de décision, 100 % client). Pistes pour aller plus loin :
 
 - **Capacité ↔ Vélocité** : lier réellement les deux tableaux (récupérer
   automatiquement la vélocité moyenne d'un tableau de Vélocité existant
@@ -342,13 +494,18 @@ plus loin :
   l'interaction serait à ajouter.
 - **Gantt ↔ Kanban** : lier une tâche du Gantt à une carte Kanban pour
   suivre son avancement réel (pas seulement planifié).
+- **Post-mortem ↔ Journal de décisions** : une action corrective issue
+  d'un post-mortem pourrait devenir une décision tracée dans le Journal.
 - **OKR : historique de progression** : actuellement seule la valeur
   courante de chaque résultat clé est gardée ; une table `okr_history`
   (snapshot horodaté à chaque mise à jour) permettrait un graphique
-  d'évolution dans le temps, comme pour la Vélocité.
+  d'évolution dans le temps, comme pour la Vélocité et le Pouls d'équipe.
 - **Rétro : plan d'action** : transformer les notes les plus votées en
-  actions assignées (table `retro_actions`), rappelées à la rétro suivante.
+  actions assignées (table `retro_actions`), rappelées à la rétro suivante —
+  pourrait réutiliser le modèle de checklist du Post-mortem.
+- **Feature flags : historique d'activation** : tracer qui a activé/désactivé
+  un flag et quand, plutôt que de ne garder que l'état courant.
 - **Comptes / espaces d'équipe** : à ce stade, un simple pseudo suffit ;
-  regrouper Kanban + Vélocité + OKR + Gantt + Capacité d'une même équipe
-  sous un espace partagé serait la vraie marche vers du "Jira-like" — mais
-  demande une vraie notion de compte, à ne faire que si le besoin se confirme.
+  regrouper tous les tableaux permanents d'une même équipe sous un espace
+  partagé serait la vraie marche vers du "Jira-like" — mais demande une
+  vraie notion de compte, à ne faire que si le besoin se confirme.

@@ -332,6 +332,120 @@ function computeSuggestedCapacity(refVelocity, members) {
 }
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══ Sondage rapide ══════════════════════════════════════════════════════════
+// Éphémère comme le Poker : sessions en mémoire, snapshot en base à la clôture.
+
+let polls = {};
+
+function broadcastPoll(id) {
+  const p = polls[id];
+  if (!p) return;
+  const tally = p.options.map((opt, i) => ({
+    text: opt,
+    votes: Object.values(p.votes).filter(v => v === i).length,
+  }));
+  p.participants.forEach(pid => {
+    io.to(pid).emit("poll:state", {
+      question: p.question,
+      options: tally,
+      participants: p.participants.length,
+      closed: p.closed,
+      myVote: p.votes[pid] ?? null,
+      isHost: p.participants[0] === pid,
+    });
+  });
+}
+
+// ═══ Objectif de sprint ══════════════════════════════════════════════════════
+let goalBoards = {};
+async function ensureGoal(id) {
+  if (goalBoards[id]) return goalBoards[id];
+  const board = await db.goalLoadBoard(id);
+  if (board) goalBoards[id] = board;
+  return goalBoards[id] || null;
+}
+function broadcastGoal(id) {
+  const g = goalBoards[id];
+  if (!g) return;
+  io.to("goal:" + id).emit("goal:state", { name: g.name, entries: g.entries });
+}
+
+// ═══ Definition of Done ══════════════════════════════════════════════════════
+let dodBoards = {};
+async function ensureDod(id) {
+  if (dodBoards[id]) return dodBoards[id];
+  const board = await db.dodLoadBoard(id);
+  if (board) dodBoards[id] = board;
+  return dodBoards[id] || null;
+}
+function broadcastDod(id) {
+  const d = dodBoards[id];
+  if (!d) return;
+  io.to("dod:" + id).emit("dod:state", { name: d.name, items: d.items });
+}
+
+// ═══ Journal de décisions ════════════════════════════════════════════════════
+let decisionBoards = {};
+async function ensureDecisions(id) {
+  if (decisionBoards[id]) return decisionBoards[id];
+  const board = await db.decisionLoadBoard(id);
+  if (board) decisionBoards[id] = board;
+  return decisionBoards[id] || null;
+}
+function broadcastDecisions(id) {
+  const d = decisionBoards[id];
+  if (!d) return;
+  io.to("dec:" + id).emit("decisions:state", { name: d.name, decisions: d.decisions });
+}
+
+// ═══ Post-mortem d'incident ══════════════════════════════════════════════════
+let postmortemBoards = {};
+async function ensurePostmortem(id) {
+  if (postmortemBoards[id]) return postmortemBoards[id];
+  const board = await db.postmortemLoad(id);
+  if (board) postmortemBoards[id] = board;
+  return postmortemBoards[id] || null;
+}
+function broadcastPostmortem(id) {
+  const p = postmortemBoards[id];
+  if (!p) return;
+  io.to("pm:" + id).emit("postmortem:state", p);
+}
+function savePostmortem(id) {
+  const p = postmortemBoards[id];
+  if (!p) return;
+  db.postmortemSave(id, p).catch(e => console.error("DB postmortemSave:", e.message));
+}
+
+// ═══ Suivi de feature flags ══════════════════════════════════════════════════
+let flagBoards = {};
+async function ensureFlags(id) {
+  if (flagBoards[id]) return flagBoards[id];
+  const board = await db.flagLoadBoard(id);
+  if (board) flagBoards[id] = board;
+  return flagBoards[id] || null;
+}
+function broadcastFlags(id) {
+  const f = flagBoards[id];
+  if (!f) return;
+  io.to("flags:" + id).emit("flags:state", { name: f.name, flags: f.flags });
+}
+
+// ═══ Pouls d'équipe ══════════════════════════════════════════════════════════
+let pulseBoards = {};
+async function ensurePulse(id) {
+  if (pulseBoards[id]) return pulseBoards[id];
+  const board = await db.pulseLoadBoard(id);
+  if (board) pulseBoards[id] = board;
+  return pulseBoards[id] || null;
+}
+function broadcastPulse(id) {
+  const p = pulseBoards[id];
+  if (!p) return;
+  io.to("pulse:" + id).emit("pulse:state", { name: p.name, entries: p.entries });
+}
+// ═══════════════════════════════════════════════════════════════════════════════
+
 io.on("connection", socket => {
 
   socket.on("session:create", (data, cb) => {
@@ -930,6 +1044,403 @@ io.on("connection", socket => {
     db.capacityDeleteEntry(id, entryId).catch(e => console.error("DB capacityDeleteEntry:", e.message));
   });
 
+  // ─── Événements Sondage rapide ──────────────────────────────────────────────
+
+  socket.on("poll:create", (data, cb) => {
+    const id = Math.random().toString(36).substring(2, 8);
+    const options = (data.options || []).map(o => String(o).trim()).filter(Boolean).slice(0, 8);
+    if (options.length < 2) return cb(null);
+    polls[id] = {
+      question: String(data.question || "").trim().slice(0, 300),
+      options,
+      votes: {},           // socketId -> optionIndex
+      participants: [socket.id],
+      closed: false,
+    };
+    socket.join("poll:" + id);
+    cb(id);
+    broadcastPoll(id);
+
+    db.createSession({
+      id, name: data.question, hostName: data.hostName, tool: "poll", taskCount: options.length
+    }).catch(e => console.error("DB createSession:", e.message));
+  });
+
+  socket.on("poll:join", ({ id }) => {
+    const p = polls[id];
+    if (!p) return socket.emit("poll:notfound");
+    if (!p.participants.includes(socket.id)) p.participants.push(socket.id);
+    socket.join("poll:" + id);
+    broadcastPoll(id);
+  });
+
+  socket.on("poll:state", ({ id, isHost }) => {
+    const p = polls[id];
+    if (!p) return socket.emit("poll:notfound");
+    socket.join("poll:" + id);
+    if (isHost && p.participants[0] !== socket.id) {
+      const idx = p.participants.indexOf(socket.id);
+      if (idx > 0) p.participants.splice(idx, 1);
+      p.participants[0] = socket.id;
+    } else if (!p.participants.includes(socket.id)) {
+      p.participants.push(socket.id);
+    }
+    broadcastPoll(id);
+  });
+
+  socket.on("poll:vote", ({ id, optionIndex }) => {
+    const p = polls[id];
+    if (!p || p.closed) return;
+    if (optionIndex < 0 || optionIndex >= p.options.length) return;
+    p.votes[socket.id] = optionIndex;
+    broadcastPoll(id);
+  });
+
+  socket.on("poll:close", ({ id }) => {
+    const p = polls[id];
+    if (!p) return;
+    if (p.participants[0] !== socket.id) return; // hôte uniquement
+    p.closed = true;
+    broadcastPoll(id);
+    const tally = p.options.map((opt, i) => ({
+      text: opt, votes: Object.values(p.votes).filter(v => v === i).length,
+    }));
+    db.savePollResults(id, tally).catch(e => console.error("DB savePollResults:", e.message));
+    db.finishSession(id).catch(e => console.error("DB finishSession:", e.message));
+    setTimeout(() => { delete polls[id]; }, 24 * 60 * 60 * 1000);
+  });
+
+  // ─── Événements Objectif de sprint ──────────────────────────────────────────
+
+  socket.on("goal:create", (data, cb) => {
+    const id = Math.random().toString(36).substring(2, 8);
+    goalBoards[id] = { name: data.name || null, entries: [] };
+    socket.join("goal:" + id);
+    cb(id);
+    db.createSession({ id, name: data.name, hostName: data.hostName, tool: "goal", taskCount: 0 })
+      .catch(e => console.error("DB createSession:", e.message));
+  });
+
+  socket.on("goal:open", async ({ id }) => {
+    const g = await ensureGoal(id).catch(() => null);
+    if (!g) return socket.emit("goal:notfound");
+    socket.join("goal:" + id);
+    socket.emit("goal:state", { name: g.name, entries: g.entries });
+  });
+
+  socket.on("goal:entry:add", async ({ id, sprintName, goalText, votes }) => {
+    const g = goalBoards[id];
+    const name = String(sprintName || "").trim().slice(0, 100);
+    const text = String(goalText || "").trim().slice(0, 300);
+    if (!g || !name || !text) return;
+    const cleanVotes = Array.isArray(votes)
+      ? votes.map(v => ({
+          name: String(v.name || "").trim().slice(0, 60),
+          confidence: Math.max(1, Math.min(5, parseInt(v.confidence) || 3)),
+        })).filter(v => v.name).slice(0, 30)
+      : [];
+    let entryId = null;
+    try { entryId = await db.goalAddEntry(id, name, text, cleanVotes); }
+    catch (e) { console.error("DB goalAddEntry:", e.message); }
+    if (entryId == null) entryId = "m" + Date.now();
+    g.entries.push({ id: entryId, sprintName: name, goalText: text, votes: cleanVotes, achieved: null });
+    broadcastGoal(id);
+  });
+
+  socket.on("goal:entry:achieved", ({ id, entryId, achieved }) => {
+    const g = goalBoards[id];
+    const entry = g?.entries.find(e => e.id === entryId);
+    if (!entry) return;
+    entry.achieved = achieved;
+    broadcastGoal(id);
+    db.goalSetAchieved(entryId, achieved).catch(e => console.error("DB goalSetAchieved:", e.message));
+  });
+
+  socket.on("goal:entry:delete", ({ id, entryId }) => {
+    const g = goalBoards[id];
+    if (!g) return;
+    const idx = g.entries.findIndex(e => e.id === entryId);
+    if (idx === -1) return;
+    g.entries.splice(idx, 1);
+    broadcastGoal(id);
+    db.goalDeleteEntry(id, entryId).catch(e => console.error("DB goalDeleteEntry:", e.message));
+  });
+
+  // ─── Événements Definition of Done ──────────────────────────────────────────
+
+  socket.on("dod:create", (data, cb) => {
+    const id = Math.random().toString(36).substring(2, 8);
+    dodBoards[id] = { name: data.name || null, items: [] };
+    socket.join("dod:" + id);
+    cb(id);
+    db.createSession({ id, name: data.name, hostName: data.hostName, tool: "dod", taskCount: 0 })
+      .catch(e => console.error("DB createSession:", e.message));
+  });
+
+  socket.on("dod:open", async ({ id }) => {
+    const d = await ensureDod(id).catch(() => null);
+    if (!d) return socket.emit("dod:notfound");
+    socket.join("dod:" + id);
+    socket.emit("dod:state", { name: d.name, items: d.items });
+  });
+
+  socket.on("dod:item:add", async ({ id, text }) => {
+    const d = dodBoards[id];
+    const t = String(text || "").trim().slice(0, 200);
+    if (!d || !t) return;
+    let itemId = null;
+    try { itemId = await db.dodAddItem(id, t); }
+    catch (e) { console.error("DB dodAddItem:", e.message); }
+    if (itemId == null) itemId = "m" + Date.now();
+    d.items.push({ id: itemId, text: t, checked: false });
+    broadcastDod(id);
+  });
+
+  socket.on("dod:item:toggle", ({ id, itemId }) => {
+    const d = dodBoards[id];
+    const item = d?.items.find(i => i.id === itemId);
+    if (!item) return;
+    item.checked = !item.checked;
+    broadcastDod(id);
+    db.dodToggleItem(itemId, item.checked).catch(e => console.error("DB dodToggleItem:", e.message));
+  });
+
+  socket.on("dod:item:delete", ({ id, itemId }) => {
+    const d = dodBoards[id];
+    if (!d) return;
+    const idx = d.items.findIndex(i => i.id === itemId);
+    if (idx === -1) return;
+    d.items.splice(idx, 1);
+    broadcastDod(id);
+    db.dodDeleteItem(itemId).catch(e => console.error("DB dodDeleteItem:", e.message));
+  });
+
+  socket.on("dod:reset", ({ id }) => {
+    const d = dodBoards[id];
+    if (!d) return;
+    d.items.forEach(i => i.checked = false);
+    broadcastDod(id);
+    db.dodResetAll(id).catch(e => console.error("DB dodResetAll:", e.message));
+  });
+
+  // ─── Événements Journal de décisions ────────────────────────────────────────
+
+  socket.on("decisions:create", (data, cb) => {
+    const id = Math.random().toString(36).substring(2, 8);
+    decisionBoards[id] = { name: data.name || null, decisions: [] };
+    socket.join("dec:" + id);
+    cb(id);
+    db.createSession({ id, name: data.name, hostName: data.hostName, tool: "decisions", taskCount: 0 })
+      .catch(e => console.error("DB createSession:", e.message));
+  });
+
+  socket.on("decisions:open", async ({ id }) => {
+    const d = await ensureDecisions(id).catch(() => null);
+    if (!d) return socket.emit("decisions:notfound");
+    socket.join("dec:" + id);
+    socket.emit("decisions:state", { name: d.name, decisions: d.decisions });
+  });
+
+  socket.on("decisions:add", async ({ id, title, context, decidedBy }) => {
+    const d = decisionBoards[id];
+    const t = String(title || "").trim().slice(0, 200);
+    const c = String(context || "").trim().slice(0, 1000);
+    const by = String(decidedBy || "").trim().slice(0, 60) || null;
+    if (!d || !t) return;
+    let decId = null;
+    try { decId = await db.decisionAdd(id, t, c, by, "acceptée"); }
+    catch (e) { console.error("DB decisionAdd:", e.message); }
+    if (decId == null) decId = "m" + Date.now();
+    d.decisions.unshift({ id: decId, title: t, context: c, decidedBy: by, status: "acceptée", createdAt: new Date().toISOString() });
+    broadcastDecisions(id);
+  });
+
+  socket.on("decisions:status", ({ id, decisionId, status }) => {
+    const d = decisionBoards[id];
+    const dec = d?.decisions.find(x => x.id === decisionId);
+    const validStatuses = ["proposée", "acceptée", "obsolète"];
+    if (!dec || !validStatuses.includes(status)) return;
+    dec.status = status;
+    broadcastDecisions(id);
+    db.decisionUpdateStatus(decisionId, status).catch(e => console.error("DB decisionUpdateStatus:", e.message));
+  });
+
+  socket.on("decisions:delete", ({ id, decisionId }) => {
+    const d = decisionBoards[id];
+    if (!d) return;
+    const idx = d.decisions.findIndex(x => x.id === decisionId);
+    if (idx === -1) return;
+    d.decisions.splice(idx, 1);
+    broadcastDecisions(id);
+    db.decisionDelete(id, decisionId).catch(e => console.error("DB decisionDelete:", e.message));
+  });
+
+  // ─── Événements Post-mortem d'incident ──────────────────────────────────────
+
+  socket.on("postmortem:create", (data, cb) => {
+    const id = Math.random().toString(36).substring(2, 8);
+    postmortemBoards[id] = { name: data.name || null, timeline: [], rootCause: "", actions: [] };
+    socket.join("pm:" + id);
+    cb(id);
+    db.createSession({ id, name: data.name, hostName: data.hostName, tool: "postmortem", taskCount: 0 })
+      .catch(e => console.error("DB createSession:", e.message));
+    savePostmortem(id);
+  });
+
+  socket.on("postmortem:open", async ({ id }) => {
+    const p = await ensurePostmortem(id).catch(() => null);
+    if (!p) return socket.emit("postmortem:notfound");
+    socket.join("pm:" + id);
+    socket.emit("postmortem:state", p);
+  });
+
+  socket.on("postmortem:timeline:add", ({ id, time, text }) => {
+    const p = postmortemBoards[id];
+    const t = String(text || "").trim().slice(0, 300);
+    if (!p || !t) return;
+    p.timeline.push({ time: String(time || "").trim().slice(0, 30), text: t });
+    broadcastPostmortem(id);
+    savePostmortem(id);
+  });
+
+  socket.on("postmortem:timeline:delete", ({ id, index }) => {
+    const p = postmortemBoards[id];
+    if (!p || index < 0 || index >= p.timeline.length) return;
+    p.timeline.splice(index, 1);
+    broadcastPostmortem(id);
+    savePostmortem(id);
+  });
+
+  socket.on("postmortem:rootcause:update", ({ id, text }) => {
+    const p = postmortemBoards[id];
+    if (!p) return;
+    p.rootCause = String(text || "").slice(0, 2000);
+    broadcastPostmortem(id);
+    savePostmortem(id);
+  });
+
+  socket.on("postmortem:action:add", ({ id, text }) => {
+    const p = postmortemBoards[id];
+    const t = String(text || "").trim().slice(0, 200);
+    if (!p || !t) return;
+    p.actions.push({ text: t, done: false });
+    broadcastPostmortem(id);
+    savePostmortem(id);
+  });
+
+  socket.on("postmortem:action:toggle", ({ id, index }) => {
+    const p = postmortemBoards[id];
+    if (!p || index < 0 || index >= p.actions.length) return;
+    p.actions[index].done = !p.actions[index].done;
+    broadcastPostmortem(id);
+    savePostmortem(id);
+  });
+
+  socket.on("postmortem:action:delete", ({ id, index }) => {
+    const p = postmortemBoards[id];
+    if (!p || index < 0 || index >= p.actions.length) return;
+    p.actions.splice(index, 1);
+    broadcastPostmortem(id);
+    savePostmortem(id);
+  });
+
+  // ─── Événements Suivi de feature flags ──────────────────────────────────────
+
+  socket.on("flags:create", (data, cb) => {
+    const id = Math.random().toString(36).substring(2, 8);
+    flagBoards[id] = { name: data.name || null, flags: [] };
+    socket.join("flags:" + id);
+    cb(id);
+    db.createSession({ id, name: data.name, hostName: data.hostName, tool: "flags", taskCount: 0 })
+      .catch(e => console.error("DB createSession:", e.message));
+  });
+
+  socket.on("flags:open", async ({ id }) => {
+    const f = await ensureFlags(id).catch(() => null);
+    if (!f) return socket.emit("flags:notfound");
+    socket.join("flags:" + id);
+    socket.emit("flags:state", { name: f.name, flags: f.flags });
+  });
+
+  const FLAG_ENVS = ["dev", "staging", "prod"];
+  socket.on("flags:add", async ({ id, name, environment, owner, notes }) => {
+    const f = flagBoards[id];
+    const n = String(name || "").trim().slice(0, 100);
+    const env = FLAG_ENVS.includes(environment) ? environment : "dev";
+    const own = String(owner || "").trim().slice(0, 60) || null;
+    const note = String(notes || "").trim().slice(0, 300) || null;
+    if (!f || !n) return;
+    let flagId = null;
+    try { flagId = await db.flagAdd(id, n, env, own, note); }
+    catch (e) { console.error("DB flagAdd:", e.message); }
+    if (flagId == null) flagId = "m" + Date.now();
+    f.flags.push({ id: flagId, name: n, active: false, environment: env, owner: own, notes: note });
+    broadcastFlags(id);
+  });
+
+  socket.on("flags:toggle", ({ id, flagId }) => {
+    const f = flagBoards[id];
+    const flag = f?.flags.find(x => x.id === flagId);
+    if (!flag) return;
+    flag.active = !flag.active;
+    broadcastFlags(id);
+    db.flagToggle(flagId, flag.active).catch(e => console.error("DB flagToggle:", e.message));
+  });
+
+  socket.on("flags:update", ({ id, flagId, environment, owner, notes }) => {
+    const f = flagBoards[id];
+    const flag = f?.flags.find(x => x.id === flagId);
+    if (!flag) return;
+    flag.environment = FLAG_ENVS.includes(environment) ? environment : flag.environment;
+    flag.owner = String(owner || "").trim().slice(0, 60) || null;
+    flag.notes = String(notes || "").trim().slice(0, 300) || null;
+    broadcastFlags(id);
+    db.flagUpdate(flagId, { environment: flag.environment, owner: flag.owner, notes: flag.notes })
+      .catch(e => console.error("DB flagUpdate:", e.message));
+  });
+
+  socket.on("flags:delete", ({ id, flagId }) => {
+    const f = flagBoards[id];
+    if (!f) return;
+    const idx = f.flags.findIndex(x => x.id === flagId);
+    if (idx === -1) return;
+    f.flags.splice(idx, 1);
+    broadcastFlags(id);
+    db.flagDelete(flagId).catch(e => console.error("DB flagDelete:", e.message));
+  });
+
+  // ─── Événements Pouls d'équipe ───────────────────────────────────────────────
+
+  socket.on("pulse:create", (data, cb) => {
+    const id = Math.random().toString(36).substring(2, 8);
+    pulseBoards[id] = { name: data.name || null, entries: [] };
+    socket.join("pulse:" + id);
+    cb(id);
+    db.createSession({ id, name: data.name, hostName: data.hostName, tool: "pulse", taskCount: 0 })
+      .catch(e => console.error("DB createSession:", e.message));
+  });
+
+  socket.on("pulse:open", async ({ id }) => {
+    const p = await ensurePulse(id).catch(() => null);
+    if (!p) return socket.emit("pulse:notfound");
+    socket.join("pulse:" + id);
+    socket.emit("pulse:state", { name: p.name, entries: p.entries });
+  });
+
+  socket.on("pulse:checkin", async ({ id, name, mood }) => {
+    const p = pulseBoards[id];
+    const n = String(name || "").trim().slice(0, 60);
+    const m = Math.max(1, Math.min(5, parseInt(mood) || 3));
+    if (!p || !n) return;
+    const today = new Date().toISOString().slice(0, 10);
+    try { await db.pulseCheckin(id, n, m); }
+    catch (e) { console.error("DB pulseCheckin:", e.message); }
+    const idx = p.entries.findIndex(e => e.name === n && e.day === today);
+    if (idx === -1) p.entries.push({ name: n, mood: m, day: today });
+    else p.entries[idx].mood = m;
+    broadcastPulse(id);
+  });
+
   socket.on("disconnect", () => {
     for (const id in sessions) {
       const idx = sessions[id].participants.findIndex(p => p.id === socket.id);
@@ -953,6 +1464,15 @@ io.on("connection", socket => {
       if (idx > 0) {
         dailies[id].participants.splice(idx, 1);
         broadcastDaily(id);
+      }
+    }
+    for (const id in polls) {
+      const p = polls[id];
+      const idx = p.participants.indexOf(socket.id);
+      if (idx > 0) { // on ne retire jamais l'hôte (index 0)
+        p.participants.splice(idx, 1);
+        delete p.votes[socket.id];
+        broadcastPoll(id);
       }
     }
   });
