@@ -15,6 +15,8 @@ import VelocityHome from "./pages/VelocityHome.jsx";
 import Velocity from "./pages/Velocity.jsx";
 import OkrHome from "./pages/OkrHome.jsx";
 import Okr from "./pages/Okr.jsx";
+import GanttHome from "./pages/GanttHome.jsx";
+import Gantt from "./pages/Gantt.jsx";
 
 export default function App(){
   return (
@@ -48,6 +50,10 @@ export default function App(){
       {/* OKR léger */}
       <Route path="/okr" element={<OkrHome/>}/>
       <Route path="/okr/:id" element={<Okr/>}/>
+
+      {/* Rétro-planning (Gantt + chemin critique) */}
+      <Route path="/gantt" element={<GanttHome/>}/>
+      <Route path="/gantt/:id" element={<Gantt/>}/>
     </Routes>
   )
 }

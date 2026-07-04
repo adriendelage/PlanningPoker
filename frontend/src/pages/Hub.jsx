@@ -63,12 +63,22 @@ const TOOLS = [
     path: "/okr",
     active: true,
   },
+  {
+    id: "gantt",
+    icon: "📅",
+    suit: "▤",
+    name: "Rétro-planning",
+    desc: "Tâches, dépendances et chemin critique calculé automatiquement — en mode Gantt.",
+    accent: "#e63946",
+    path: "/gantt",
+    active: true,
+  },
 ];
 
 // Où renvoyer l'utilisateur selon l'outil et son rôle lors de sa dernière visite.
 // Kanban, Vélocité et OKR n'ont pas d'étape « rejoindre » : on rouvre
 // toujours le tableau directement, quel que soit le rôle.
-const PERMANENT_TOOLS = ["kanban", "velocity", "okr"];
+const PERMANENT_TOOLS = ["kanban", "velocity", "okr", "gantt"];
 function resolveLink(entry) {
   const { id, tool, role } = entry;
   if (PERMANENT_TOOLS.includes(tool)) return `/${tool}/${id}`;
@@ -83,6 +93,7 @@ const TOOL_META = {
   kanban:   { icon: "📋", accent: "#9b5de5" },
   velocity: { icon: "📈", accent: "#00bbf9" },
   okr:      { icon: "🎯", accent: "#ff9f1c" },
+  gantt:    { icon: "📅", accent: "#e63946" },
 };
 
 function fmtDate(ts) {

@@ -1,9 +1,10 @@
 # 🧰 Agile Toolbox — Guide d'intégration
 
 Extension de Planning Poker Pro en boîte à outils complète : hub d'accueil,
-persistance PostgreSQL, historique privé (local au navigateur), et 5 nouveaux
+persistance PostgreSQL, historique privé (local au navigateur), et 6 nouveaux
 outils — **Rétrospective**, **Daily Timer**, **Kanban léger**,
-**Suivi de vélocité** et **OKR léger**.
+**Suivi de vélocité**, **OKR léger** et **Rétro-planning** (Gantt +
+chemin critique).
 
 ## Fichiers à intégrer dans ton repo
 
@@ -29,6 +30,9 @@ outils — **Rétrospective**, **Daily Timer**, **Kanban léger**,
 | `frontend/src/pages/Velocity.jsx` | **Nouveau** | Graphique engagé/livré (SVG fait main) + stats + historique des sprints |
 | `frontend/src/pages/OkrHome.jsx` | **Nouveau** | Création d'un cycle OKR |
 | `frontend/src/pages/Okr.jsx` | **Nouveau** | Objectifs + résultats clés, progression mise à jour en direct |
+| `frontend/src/cpm.js` | **Nouveau** | Moteur de calcul du chemin critique (fonction pure, testée isolément) |
+| `frontend/src/pages/GanttHome.jsx` | **Nouveau** | Création d'un rétro-planning |
+| `frontend/src/pages/Gantt.jsx` | **Nouveau** | Graphique de Gantt (SVG fait main) + tâches/dépendances + chemin critique |
 
 ⚠️ **`frontend/src/api.js` doit être supprimé de ton repo** — il n'est plus
 utilisé par rien (le hub ne fait plus aucun appel réseau pour son historique).
@@ -164,6 +168,56 @@ progression globale du cycle est affichée en haut du tableau.
 0-100 côté serveur), `okr:kr:delete`. Reprise après redémarrage vérifiée
 comme pour le Kanban et la Vélocité.
 
+## L'outil Rétro-planning (Gantt + chemin critique)
+
+Le plus ambitieux des 7 outils : un vrai graphe de dépendances entre tâches,
+avec calcul automatique du **chemin critique** par la méthode CPM
+(Critical Path Method).
+
+**Répartition des responsabilités** — c'est le point important de cet
+outil : le serveur ne fait que stocker et diffuser les tâches et leurs
+dépendances brutes (`{id, name, duration, dependsOn: [id, ...]}`). Le calcul
+CPM lui-même (`frontend/src/cpm.js`) est une **fonction pure côté client** :
+à graphe identique, le résultat est identique pour tout le monde, donc
+inutile de le recalculer sur le serveur et de le renvoyer — chaque
+navigateur le recalcule à partir du même état reçu par Socket.IO.
+
+**Ce que fait `cpm.js`, dans l'ordre :**
+1. Détection de cycle (DFS à 3 couleurs) — une dépendance circulaire
+   (A dépend de B qui dépend de A) rend le calcul impossible ; c'est
+   détecté et signalé par une bannière d'avertissement plutôt que de
+   planter ou de boucler.
+2. Tri topologique (algorithme de Kahn).
+3. Passe avant : dates au plus tôt (ES/EF, Earliest Start/Finish).
+4. Passe arrière : dates au plus tard (LS/LF, Latest Start/Finish).
+5. Marge (`slack = LS - ES`) et chemin critique (tâches à marge nulle).
+
+Ce moteur a été **validé indépendamment de l'interface**, avec un cas de
+référence calculé à la main (4 tâches, un chemin critique connu à l'avance)
+avant même d'écrire la moindre ligne d'UI — les valeurs ES/EF/LS/LF/marge
+obtenues correspondent exactement au calcul manuel.
+
+**Simplification assumée** : le planning raisonne en jours relatifs
+(J0, J1, J2…) et non en dates calendaires réelles — pas de gestion des
+jours fériés ou week-ends. C'est un choix pour rester simple ; si tu veux
+des vraies dates, il faudrait ajouter une date de début de projet et
+convertir les jours en dates ouvrées, ce qui complique sensiblement le
+calcul (calendrier métier).
+
+**Interaction** : pas de drag-and-drop (redimensionner une barre à la
+souris, tracer une dépendance en glissant) — ça demanderait une bonne
+quantité de code en plus pour un gain d'ergonomie qui ne semblait pas
+justifié dans un premier temps. À la place : formulaires + cases à cocher
+pour les dépendances, ce qui reste rapide à l'usage pour un planning de
+taille raisonnable (jusqu'à une trentaine de tâches). Le drag-and-drop
+reste une piste d'amélioration si le besoin se confirme (voir plus bas).
+
+Événements : `gantt:create`, `gantt:open`, `gantt:task:add`,
+`gantt:task:update` (nom/durée), `gantt:task:deps:update` (remplace
+l'ensemble des dépendances d'une tâche), `gantt:task:delete` (nettoie
+aussi les références orphelines chez les autres tâches). Reprise après
+redémarrage vérifiée comme pour les autres outils permanents.
+
 ## Base de données sur Railway
 
 1. Dans ton projet Railway : **+ New → Database → PostgreSQL**
@@ -202,11 +256,14 @@ kanban_cards    (id, session_id → sessions, column_name, title, created_at)
 velocity_sprints(id, session_id → sessions, sprint_name, committed, completed, created_at)
 okr_objectives  (id, session_id → sessions, title, position, created_at)
 okr_key_results (id, objective_id → okr_objectives, title, progress, position, created_at)
+gantt_tasks     (id, session_id → sessions, name, duration, position, created_at)
+gantt_dependencies (id, task_id → gantt_tasks, depends_on_id → gantt_tasks,
+                    UNIQUE(task_id, depends_on_id))
 ```
 
 Une seule table `sessions` pour tout le hub (`tool` = `poker` / `retro` /
-`daily` / `kanban` / `velocity` / `okr`), avec une ou deux tables de
-résultats par outil. Ces données ne sont plus exposées via HTTP (voir
+`daily` / `kanban` / `velocity` / `okr` / `gantt`), avec une ou deux tables
+de résultats par outil. Ces données ne sont plus exposées via HTTP (voir
 plus haut), mais `db.getSession(id)` reste disponible côté serveur pour
 un futur usage interne (export, admin).
 
@@ -236,26 +293,27 @@ ajoute dans `vite.config.js` (section `server.proxy`) :
 
 ## Pistes pour la suite
 
-Les 6 outils du hub sont maintenant tous fonctionnels. Pistes pour aller
+Les 7 outils du hub sont maintenant tous fonctionnels. Pistes pour aller
 plus loin :
 
-- **Vélocité ↔ Poker** : aujourd'hui les deux outils sont indépendants ;
-  relier automatiquement les points estimés en Poker à un sprint de
-  Vélocité éviterait la ressaisie manuelle.
+- **Gantt : dates calendaires réelles** : remplacer les jours relatifs
+  (J0, J1…) par de vraies dates, avec gestion des week-ends/jours fériés —
+  complexifie le calcul mais rapproche l'outil d'un vrai planning projet.
+- **Gantt : drag-and-drop** : redimensionner les barres à la souris pour
+  changer la durée, tracer une dépendance en glissant d'une barre à
+  l'autre. Le moteur CPM (`cpm.js`) n'a pas besoin de changer, seule
+  l'interaction serait à ajouter.
+- **Gantt ↔ Kanban** : lier une tâche du Gantt à une carte Kanban pour
+  suivre son avancement réel (pas seulement planifié).
+- **Vélocité ↔ Poker** : relier automatiquement les points estimés en
+  Poker à un sprint de Vélocité pour éviter la ressaisie manuelle.
 - **OKR : historique de progression** : actuellement seule la valeur
   courante de chaque résultat clé est gardée ; une table `okr_history`
   (snapshot horodaté à chaque mise à jour) permettrait un graphique
   d'évolution dans le temps, comme pour la Vélocité.
 - **Rétro : plan d'action** : transformer les notes les plus votées en
   actions assignées (table `retro_actions`), rappelées à la rétro suivante.
-- **Kanban : plus de colonnes / drag & drop** : actuellement 3 colonnes
-  fixes et déplacement par boutons ← → (pas de bibliothèque de drag & drop,
-  volontairement, pour rester léger) ; une lib comme `@dnd-kit/core` peut
-  s'ajouter sans toucher au modèle serveur.
-- **Matrice Impact/Effort** : un outil de priorisation à 4 quadrants,
-  réutilisant le pattern de déplacement du Kanban mais avec des
-  coordonnées x/y libres plutôt que des colonnes fixes.
 - **Comptes / espaces d'équipe** : à ce stade, un simple pseudo suffit ;
-  regrouper Kanban + Vélocité + OKR d'une même équipe sous un espace
-  partagé serait la vraie marche vers du "Jira-like" — mais demande une
-  vraie notion de compte, à ne faire que si le besoin se confirme.
+  regrouper Kanban + Vélocité + OKR + Gantt d'une même équipe sous un
+  espace partagé serait la vraie marche vers du "Jira-like" — mais demande
+  une vraie notion de compte, à ne faire que si le besoin se confirme.

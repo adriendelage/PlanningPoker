@@ -96,6 +96,26 @@ async function init() {
       created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS gantt_tasks (
+      id          SERIAL PRIMARY KEY,
+      session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      name        TEXT NOT NULL,
+      duration    INT NOT NULL DEFAULT 1,
+      position    INT NOT NULL DEFAULT 0,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- Table de jonction : task_id dépend de depends_on_id.
+    -- Les deux clés étrangères sont en CASCADE pour que la suppression
+    -- d'une tâche nettoie toutes les dépendances qui la référencent,
+    -- qu'elle soit la tâche dépendante ou la tâche dont on dépend.
+    CREATE TABLE IF NOT EXISTS gantt_dependencies (
+      id             SERIAL PRIMARY KEY,
+      task_id        INT NOT NULL REFERENCES gantt_tasks(id) ON DELETE CASCADE,
+      depends_on_id  INT NOT NULL REFERENCES gantt_tasks(id) ON DELETE CASCADE,
+      UNIQUE (task_id, depends_on_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions (created_at DESC);
   `);
   console.log("✅ Base de données initialisée");
@@ -328,6 +348,79 @@ async function okrLoadBoard(id) {
   };
 }
 
+// ── Rétro-planning (Gantt) : la base est la source de vérité ────────────────
+
+async function ganttAddTask(sessionId, name, duration) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO gantt_tasks (session_id, name, duration, position)
+     VALUES ($1, $2, $3, (SELECT COALESCE(MAX(position), -1) + 1 FROM gantt_tasks WHERE session_id = $1))
+     RETURNING id`,
+    [sessionId, name, duration]
+  );
+  return rows[0].id;
+}
+
+async function ganttUpdateTask(taskId, name, duration) {
+  if (!enabled()) return;
+  await pool.query(`UPDATE gantt_tasks SET name = $2, duration = $3 WHERE id = $1`, [taskId, name, duration]);
+}
+
+async function ganttDeleteTask(taskId) {
+  if (!enabled()) return;
+  await pool.query(`DELETE FROM gantt_tasks WHERE id = $1`, [taskId]);
+}
+
+// Remplace entièrement l'ensemble des dépendances d'une tâche (transaction).
+async function ganttSetDependencies(taskId, dependsOnIds) {
+  if (!enabled()) return;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM gantt_dependencies WHERE task_id = $1`, [taskId]);
+    for (const depId of dependsOnIds) {
+      if (depId === taskId) continue; // pas d'auto-dépendance
+      await client.query(
+        `INSERT INTO gantt_dependencies (task_id, depends_on_id) VALUES ($1, $2)
+         ON CONFLICT DO NOTHING`,
+        [taskId, depId]
+      );
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+async function ganttLoadBoard(id) {
+  if (!enabled()) return null;
+  const s = await pool.query(`SELECT * FROM sessions WHERE id = $1 AND tool = 'gantt'`, [id]);
+  if (s.rows.length === 0) return null;
+  const tasks = await pool.query(
+    `SELECT id, name, duration FROM gantt_tasks WHERE session_id = $1 ORDER BY position, id`,
+    [id]
+  );
+  const deps = await pool.query(
+    `SELECT d.task_id, d.depends_on_id
+     FROM gantt_dependencies d
+     JOIN gantt_tasks t ON t.id = d.task_id
+     WHERE t.session_id = $1`,
+    [id]
+  );
+  return {
+    name: s.rows[0].name,
+    tasks: tasks.rows.map(t => ({
+      id: t.id,
+      name: t.name,
+      duration: t.duration,
+      dependsOn: deps.rows.filter(d => d.task_id === t.id).map(d => d.depends_on_id)
+    }))
+  };
+}
+
 async function finishSession(id) {
   if (!enabled()) return;
   await pool.query(
@@ -396,6 +489,17 @@ async function getSession(id) {
       [id]
     );
     results = r.rows;
+  } else if (session.tool === "gantt") {
+    const r = await pool.query(
+      `SELECT t.id, t.name, t.duration,
+              array_remove(array_agg(d.depends_on_id), NULL) AS depends_on
+       FROM gantt_tasks t
+       LEFT JOIN gantt_dependencies d ON d.task_id = t.id
+       WHERE t.session_id = $1
+       GROUP BY t.id ORDER BY t.position, t.id`,
+      [id]
+    );
+    results = r.rows;
   } else {
     const r = await pool.query(
       `SELECT task_index, task, median, votes
@@ -413,5 +517,6 @@ module.exports = {
   velocityAddSprint, velocityDeleteSprint, velocityLoadBoard,
   okrAddObjective, okrDeleteObjective, okrAddKeyResult, okrUpdateKeyResult,
   okrDeleteKeyResult, okrLoadBoard,
+  ganttAddTask, ganttUpdateTask, ganttDeleteTask, ganttSetDependencies, ganttLoadBoard,
   finishSession, listSessions, getSession
 };

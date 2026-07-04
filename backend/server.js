@@ -279,6 +279,29 @@ function broadcastOkr(id) {
 }
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══ Rétro-planning (Gantt) ═════════════════════════════════════════════════════
+// Même principe que Kanban/Vélocité/OKR : outil permanent, base = source de
+// vérité. Le calcul du chemin critique (CPM) est un calcul PUR à partir des
+// tâches et dépendances — il est fait côté client (frontend/src/cpm.js),
+// puisque c'est une fonction déterministe du même graphe pour tout le monde.
+// Le serveur ne fait que stocker et diffuser les tâches/dépendances brutes.
+
+let ganttBoards = {};
+
+async function ensureGantt(id) {
+  if (ganttBoards[id]) return ganttBoards[id];
+  const board = await db.ganttLoadBoard(id);
+  if (board) ganttBoards[id] = board;
+  return ganttBoards[id] || null;
+}
+
+function broadcastGantt(id) {
+  const g = ganttBoards[id];
+  if (!g) return;
+  io.to("gantt:" + id).emit("gantt:state", { name: g.name, tasks: g.tasks });
+}
+// ═══════════════════════════════════════════════════════════════════════════════
+
 io.on("connection", socket => {
 
   socket.on("session:create", (data, cb) => {
@@ -743,6 +766,85 @@ io.on("connection", socket => {
     obj.keyResults.splice(idx, 1);
     broadcastOkr(id);
     db.okrDeleteKeyResult(krId).catch(e => console.error("DB okrDeleteKeyResult:", e.message));
+  });
+
+  // ─── Événements Rétro-planning (Gantt) ─────────────────────────────────────
+
+  socket.on("gantt:create", (data, cb) => {
+    const id = Math.random().toString(36).substring(2, 8);
+    ganttBoards[id] = { name: data.name || null, tasks: [] };
+    socket.join("gantt:" + id);
+    cb(id);
+
+    db.createSession({
+      id, name: data.name, hostName: data.hostName, tool: "gantt", taskCount: 0
+    }).catch(e => console.error("DB createSession:", e.message));
+  });
+
+  socket.on("gantt:open", async ({ id }) => {
+    const g = await ensureGantt(id).catch(() => null);
+    if (!g) return socket.emit("gantt:notfound");
+    socket.join("gantt:" + id);
+    socket.emit("gantt:state", { name: g.name, tasks: g.tasks });
+  });
+
+  socket.on("gantt:task:add", async ({ id, name, duration, dependsOn }) => {
+    const g = ganttBoards[id];
+    const t = String(name || "").trim().slice(0, 200);
+    const d = Math.max(1, Math.min(365, parseInt(duration) || 1));
+    if (!g || !t) return;
+    const validDeps = Array.isArray(dependsOn)
+      ? dependsOn.filter(depId => g.tasks.some(x => x.id === depId))
+      : [];
+    let taskId = null;
+    try { taskId = await db.ganttAddTask(id, t, d); }
+    catch (e) { console.error("DB ganttAddTask:", e.message); }
+    if (taskId == null) taskId = "m" + Date.now(); // mode mémoire
+    g.tasks.push({ id: taskId, name: t, duration: d, dependsOn: validDeps });
+    if (validDeps.length && typeof taskId !== "string") {
+      db.ganttSetDependencies(taskId, validDeps).catch(e => console.error("DB ganttSetDependencies:", e.message));
+    }
+    broadcastGantt(id);
+  });
+
+  socket.on("gantt:task:update", ({ id, taskId, name, duration }) => {
+    const g = ganttBoards[id];
+    const task = g?.tasks.find(t => t.id === taskId);
+    if (!task) return;
+    if (name != null) task.name = String(name).trim().slice(0, 200) || task.name;
+    if (duration != null) task.duration = Math.max(1, Math.min(365, parseInt(duration) || task.duration));
+    broadcastGantt(id);
+    db.ganttUpdateTask(taskId, task.name, task.duration).catch(e => console.error("DB ganttUpdateTask:", e.message));
+  });
+
+  // Remplace l'ensemble des dépendances d'une tâche. La détection de cycle
+  // n'est pas bloquée ici : elle est signalée visuellement côté client
+  // (bannière d'avertissement) plutôt que rejetée côté serveur, pour rester
+  // simple — un cycle temporaire pendant l'édition n'est pas dangereux,
+  // juste non calculable tant qu'il n'est pas corrigé.
+  socket.on("gantt:task:deps:update", ({ id, taskId, dependsOn }) => {
+    const g = ganttBoards[id];
+    const task = g?.tasks.find(t => t.id === taskId);
+    if (!task) return;
+    const validDeps = Array.isArray(dependsOn)
+      ? dependsOn.filter(depId => depId !== taskId && g.tasks.some(x => x.id === depId))
+      : [];
+    task.dependsOn = validDeps;
+    broadcastGantt(id);
+    db.ganttSetDependencies(taskId, validDeps).catch(e => console.error("DB ganttSetDependencies:", e.message));
+  });
+
+  socket.on("gantt:task:delete", ({ id, taskId }) => {
+    const g = ganttBoards[id];
+    if (!g) return;
+    const idx = g.tasks.findIndex(t => t.id === taskId);
+    if (idx === -1) return;
+    g.tasks.splice(idx, 1);
+    // Retire aussi les références à cette tâche comme dépendance ailleurs,
+    // pour ne pas laisser de dépendance fantôme en mémoire.
+    g.tasks.forEach(t => { t.dependsOn = t.dependsOn.filter(d => d !== taskId); });
+    broadcastGantt(id);
+    db.ganttDeleteTask(taskId).catch(e => console.error("DB ganttDeleteTask:", e.message));
   });
 
   socket.on("disconnect", () => {
