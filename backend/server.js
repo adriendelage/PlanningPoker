@@ -4,6 +4,7 @@ const { Server } = require("socket.io");
 const cors = require("cors");
 const path = require("path");
 const db = require("./db");
+const { router: authRouter } = require("./auth");
 
 const app = express();
 app.use(cors());
@@ -13,6 +14,10 @@ app.use(express.json());
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, db: db.enabled() });
 });
+
+// Espace de travail connecté (comptes, organisations) — complètement
+// indépendant du reste : voir backend/auth.js.
+app.use("/api/auth", authRouter);
 
 // Remarque : il n'y a volontairement aucun endpoint qui liste ou expose
 // les sessions passées. Ces données (noms, hôtes, contenu des votes/notes)

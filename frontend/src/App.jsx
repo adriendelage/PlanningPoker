@@ -34,6 +34,10 @@ import Flags from "./pages/Flags.jsx";
 import PulseHome from "./pages/PulseHome.jsx";
 import Pulse from "./pages/Pulse.jsx";
 import Wheel from "./pages/Wheel.jsx";
+import Login from "./pages/Login.jsx";
+import Register from "./pages/Register.jsx";
+import AppHome from "./pages/AppHome.jsx";
+import RequireAuth from "./RequireAuth.jsx";
 
 export default function App(){
   return (
@@ -106,6 +110,11 @@ export default function App(){
 
       {/* Roue de décision — 100% client, pas de session */}
       <Route path="/wheel" element={<Wheel/>}/>
+
+      {/* Espace de travail connecté (comptes) — indépendant du mode lien */}
+      <Route path="/login" element={<Login/>}/>
+      <Route path="/register" element={<Register/>}/>
+      <Route path="/app" element={<RequireAuth><AppHome/></RequireAuth>}/>
     </Routes>
   )
 }

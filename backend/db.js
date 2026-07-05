@@ -201,6 +201,34 @@ async function init() {
       UNIQUE (session_id, name, day)
     );
 
+    -- ═══ Espace de travail connecté (mode compte, indépendant du mode lien) ═══
+    -- Complètement isolé des tables ci-dessus : aucun outil existant ne les
+    -- référence. C'est la fondation de l'étape 2 (table "items" partagée).
+
+    CREATE TABLE IF NOT EXISTS users (
+      id            SERIAL PRIMARY KEY,
+      email         TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      name          TEXT NOT NULL,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS organizations (
+      id          SERIAL PRIMARY KEY,
+      name        TEXT NOT NULL,
+      slug        TEXT UNIQUE NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS memberships (
+      id          SERIAL PRIMARY KEY,
+      user_id     INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      org_id      INT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      role        TEXT NOT NULL DEFAULT 'owner',
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (user_id, org_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions (created_at DESC);
   `);
   console.log("✅ Base de données initialisée");
@@ -800,6 +828,79 @@ async function pulseLoadBoard(id) {
   return { name: s.rows[0].name, entries: r.rows };
 }
 
+// ═══ Espace de travail connecté : authentification ══════════════════════════
+
+async function authFindUserByEmail(email) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(`SELECT * FROM users WHERE email = $1`, [email]);
+  return rows[0] || null;
+}
+
+// Crée l'utilisateur, son organisation et le lien "owner" entre les deux
+// dans une seule transaction : soit tout réussit, soit rien n'est créé.
+// Le slug de l'organisation est garanti unique (retry avec suffixe en cas
+// de collision, plutôt que de vérifier l'unicité avant coup — plus sûr
+// contre les races entre deux inscriptions simultanées avec le même nom).
+async function authRegister(name, email, passwordHash, orgName, orgSlugBase) {
+  if (!enabled()) throw new Error("DB_DISABLED");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const userRes = await client.query(
+      `INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email, created_at`,
+      [name, email, passwordHash]
+    );
+    const user = userRes.rows[0];
+
+    let org, suffix = 0;
+    while (true) {
+      const slug = suffix === 0 ? orgSlugBase : `${orgSlugBase}-${suffix}`;
+      await client.query("SAVEPOINT before_org_insert");
+      try {
+        const orgRes = await client.query(
+          `INSERT INTO organizations (name, slug) VALUES ($1, $2) RETURNING id, name, slug, created_at`,
+          [orgName, slug]
+        );
+        org = orgRes.rows[0];
+        break;
+      } catch (e) {
+        // Un INSERT qui échoue avorte toute la transaction en PostgreSQL —
+        // le SAVEPOINT permet de revenir juste avant cet INSERT précis
+        // pour réessayer avec un autre slug, sans perdre l'utilisateur
+        // déjà créé plus haut dans la même transaction.
+        await client.query("ROLLBACK TO SAVEPOINT before_org_insert");
+        if (e.code === "23505" && suffix < 20) { suffix++; continue; } // unique_violation sur slug
+        throw e;
+      }
+    }
+
+    await client.query(
+      `INSERT INTO memberships (user_id, org_id, role) VALUES ($1, $2, 'owner')`,
+      [user.id, org.id]
+    );
+
+    await client.query("COMMIT");
+    return { user, org };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+async function authGetUserOrgs(userId) {
+  if (!enabled()) return [];
+  const { rows } = await pool.query(
+    `SELECT o.id, o.name, o.slug, m.role
+     FROM memberships m JOIN organizations o ON o.id = m.org_id
+     WHERE m.user_id = $1 ORDER BY m.created_at`,
+    [userId]
+  );
+  return rows;
+}
+
 async function finishSession(id) {
   if (!enabled()) return;
   await pool.query(
@@ -951,5 +1052,6 @@ module.exports = {
   postmortemSave, postmortemLoad,
   flagAdd, flagToggle, flagUpdate, flagDelete, flagLoadBoard,
   pulseCheckin, pulseLoadBoard,
+  authFindUserByEmail, authRegister, authGetUserOrgs,
   finishSession, listSessions, getSession
 };

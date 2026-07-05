@@ -242,7 +242,13 @@ export default function Hub() {
       <div style={{ maxWidth: 880, margin: "0 auto" }}>
 
         {/* ── En-tête ── */}
-        <header style={{ textAlign: "center", marginBottom: 48 }}>
+        <header style={{ textAlign: "center", marginBottom: 48, position: "relative" }}>
+          <a href="/app" style={{
+            position: "absolute", top: 0, right: 0, fontSize: 13, color: "#666",
+            textDecoration: "none", border: "1px solid #333", borderRadius: 999, padding: "6px 14px",
+          }}>
+            🔐 Espace d'équipe
+          </a>
           <div style={{ fontSize: 15, letterSpacing: 4, color: "#555", textTransform: "uppercase", marginBottom: 10 }}>
             ♠ ♥ ♦ ♣
           </div>

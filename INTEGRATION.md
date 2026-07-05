@@ -1,18 +1,22 @@
 # 🧰 Agile Toolbox — Guide d'intégration
 
 Extension de Planning Poker Pro en boîte à outils complète : hub d'accueil,
-persistance PostgreSQL, historique privé (local au navigateur), et 14
-nouveaux outils — **Rétrospective**, **Daily Timer**, **Kanban léger**,
-**Suivi de vélocité**, **OKR léger**, **Rétro-planning** (Gantt + chemin
-critique), **Planificateur de capacité**, **Sondage rapide**, **Objectif
-de sprint**, **Definition of Done**, **Journal de décisions**,
-**Post-mortem d'incident**, **Suivi de feature flags**, **Pouls d'équipe**,
-et la **Roue de décision** (100 % client, sans backend).
+persistance PostgreSQL, historique privé (local au navigateur), 14 outils
+en mode "lien" (sans compte), et le tout début d'un **espace de travail
+connecté** (comptes, organisations) — étape 1 d'un chantier plus large vers
+un mode "interconnecté façon Jira", en parallèle du mode lien qui reste
+inchangé.
 
 ## Fichiers à intégrer dans ton repo
 
 | Fichier | Action | Rôle |
 |---|---|---|
+| `backend/auth.js` | **Nouveau** | Authentification : register/login/me, JWT, bcrypt, rate-limiting |
+| `frontend/src/auth.js` | **Nouveau** | Client d'authentification (jeton en localStorage) |
+| `frontend/src/RequireAuth.jsx` | **Nouveau** | Wrapper de protection de route pour `/app/*` |
+| `frontend/src/pages/Login.jsx` | **Nouveau** | Connexion |
+| `frontend/src/pages/Register.jsx` | **Nouveau** | Inscription (crée compte + organisation) |
+| `frontend/src/pages/AppHome.jsx` | **Nouveau** | Page protégée de l'espace de travail (étape 1 : preuve que l'auth fonctionne) |
 | `backend/db.js` | **Nouveau** | Module PostgreSQL (pool `pg`, schéma auto-créé, dégradation gracieuse sans DB) |
 | `backend/server.js` | **Remplace** | Serveur + persistance + événements Rétro/Daily/Kanban/Vélocité/OKR — **aucun endpoint public de liste** |
 | `backend/package.json` | **Remplace** | Ajout de la dépendance `pg` |
@@ -87,6 +91,88 @@ La base garde toujours les données (`sessions`, `poker_results`,
 `retro_notes`, `daily_times`, `kanban_cards`) pour la fiabilité et un futur
 usage interne éventuel (export CSV pour toi, par exemple), mais rien n'est
 plus exposé publiquement via HTTP.
+
+## L'espace de travail connecté (comptes) — étape 1
+
+Un second mode d'accès, **complètement séparé** des 14 outils en mode
+lien : `/login`, `/register`, `/app`. Aucun outil existant n'a été touché
+pour ça — ni leurs tables, ni leurs événements Socket.IO. C'est la
+fondation du chantier "façon Jira" : à terme, une table `items` partagée
+remplacera les silos actuels (une carte Kanban ≠ une tâche Gantt ≠ une
+story du Poker), mais cette étape 1 se limite à l'authentification :
+inscription, connexion, route protégée. Aucune logique métier connectée
+pour l'instant — `AppHome.jsx` n'est qu'une preuve que la boucle
+fonctionne de bout en bout.
+
+**Modèle de données** (3 tables, isolées du reste) :
+```sql
+users         (id, email UNIQUE, password_hash, name, created_at)
+organizations (id, name, slug UNIQUE, created_at)
+memberships   (id, user_id → users, org_id → organizations, role,
+               UNIQUE(user_id, org_id))
+```
+À l'inscription, un utilisateur, une organisation et le lien "owner" entre
+les deux sont créés **dans une seule transaction** : soit tout réussit,
+soit rien n'est créé. Le slug de l'organisation (dérivé du nom, ex.
+"Équipe Backend" → `equipe-backend`) est garanti unique : en cas de
+collision, PostgreSQL rejette l'INSERT, et le code retente avec un
+suffixe (`equipe-backend-1`, `-2`...) via un `SAVEPOINT` — indispensable
+en PostgreSQL, où un INSERT en échec avorte toute la transaction en cours ;
+sans SAVEPOINT, la requête suivante échoue avec *"current transaction is
+aborted"* même si elle est valide. (On l'a découvert à la dure en testant :
+le premier essai plantait exactement comme ça, corrigé avant livraison.)
+
+**Choix de sécurité, et pourquoi :**
+- **Mots de passe** : hashés avec `bcryptjs` (12 rounds), jamais stockés
+  ni loggés en clair. `bcryptjs` plutôt que `bcrypt` : implémentation pure
+  JS, aucune compilation native requise — évite un échec de build sur
+  Railway lié à la toolchain (gcc/python) qui peut manquer selon l'image
+  de build utilisée.
+- **Jetons JWT plutôt que cookies de session** : le jeton part dans l'en-
+  tête `Authorization: Bearer <token>`, jamais en cookie. Ça évite toute
+  la complexité des cookies cross-domain (le frontend est sur Netlify, le
+  backend sur Railway — deux domaines différents, ce qui impose des
+  réglages `SameSite=None; Secure` et des configurations CORS avec
+  `credentials: true` bien plus délicates à sécuriser correctement).
+  Contrepartie assumée : le jeton vit dans le `localStorage` du navigateur,
+  accessible à n'importe quel script JS exécuté sur la page — un vrai
+  risque si jamais une faille XSS apparaît ailleurs dans l'app. Si l'espace
+  de travail grandit sérieusement, migrer vers un cookie `httpOnly` (avec
+  un backend et un frontend sur le même domaine, ou un reverse-proxy qui
+  les unifie) serait la prochaine amélioration de sécurité à considérer.
+- **Attaque par énumération d'emails empêchée** : le login renvoie le
+  *même* message ("Email ou mot de passe incorrect") que l'email existe
+  ou non, et compare toujours un hash bcrypt (un hash factice si l'email
+  est inconnu) pour qu'un attaquant ne puisse pas déduire, par le temps de
+  réponse, si un compte existe. Vérifié par test.
+- **Anti brute-force** : `express-rate-limit` limite les tentatives de
+  connexion (10 / 15 min / IP) et d'inscription (20 / heure / IP).
+  Limitation connue : le compteur vit en mémoire du process — il repart à
+  zéro à chaque redéploiement Railway, et ne serait pas partagé si le
+  service tournait un jour sur plusieurs instances. Suffisant pour l'usage
+  actuel, mais à remplacer par un store partagé (Redis) si ça devient un
+  vrai sujet.
+- **`JWT_SECRET`** : à définir en variable d'environnement sur Railway
+  avant toute utilisation réelle. Sans elle, le serveur démarre quand même
+  (pour ne pas bloquer le dev local) mais avec un secret de développement
+  non sécurisé, et **affiche un avertissement bien visible dans les logs**
+  au démarrage pour que ça ne passe pas inaperçu en production.
+
+**Routes** : `POST /api/auth/register`, `POST /api/auth/login`,
+`GET /api/auth/me` (protégée). Toutes renvoient `503` si `DATABASE_URL`
+n'est pas configurée — un système de comptes ne peut pas se dégrader en
+mode mémoire comme les autres outils, il a besoin de la base pour exister
+du tout.
+
+**Variable d'environnement à ajouter sur Railway :**
+```
+JWT_SECRET=<une chaîne aléatoire longue et unique — génère-la avec
+            `openssl rand -base64 48` ou un gestionnaire de mots de passe>
+```
+
+**Sur le hub**, un petit lien discret "🔐 Espace d'équipe" en haut à droite
+mène vers `/app` — le mode lien reste la porte d'entrée principale,
+inchangée.
 
 ## L'outil Rétrospective
 
@@ -478,34 +564,49 @@ ajoute dans `vite.config.js` (section `server.proxy`) :
 
 ## Pistes pour la suite
 
-Les 15 outils du hub sont maintenant tous fonctionnels (14 avec backend +
-la Roue de décision, 100 % client). Pistes pour aller plus loin :
+Les 15 outils du hub sont tous fonctionnels (14 avec backend + la Roue de
+décision, 100 % client), et l'étape 1 de l'espace de travail connecté
+(comptes, organisations) est posée. Pistes pour aller plus loin :
 
+**La suite logique du chantier "façon Jira" :**
+- **Étape 2 — table `items` partagée** : le vrai cœur du sujet. Une table
+  `items` (titre, statut, assigné, story_points, sprint_id, org_id) que
+  Kanban, Gantt et Vélocité viendraient lire/écrire au lieu d'avoir chacun
+  leurs propres tables isolées (`kanban_cards`, `gantt_tasks`,
+  `velocity_sprints`). C'est un changement d'architecture, pas un nouvel
+  outil — à faire une fois l'étape 1 éprouvée en usage réel.
+- **Étape 3 — fiche détail d'un item** : commentaires, historique
+  d'activité, liens entre items (bloque/dépend de — le modèle de
+  dépendances du Gantt actuel est réutilisable presque tel quel).
+- **Rôles et permissions** : pour l'instant, `memberships.role` ne connaît
+  que `owner` ; ajouter `member`/`admin` et des invitations par email
+  serait nécessaire avant d'ouvrir l'espace à plusieurs personnes par équipe.
+
+**Sur l'auth elle-même (étape 1) :**
+- Passer le rate-limiting sur un store partagé (Redis) si le service
+  tourne un jour sur plusieurs instances.
+- Ajouter un flux de réinitialisation de mot de passe (actuellement absent).
+- Envisager un cookie `httpOnly` à la place du jeton en `localStorage` si
+  l'espace de travail grandit sérieusement (voir la section dédiée plus haut).
+
+**Sur les outils en mode lien (inchangés par ce chantier) :**
 - **Capacité ↔ Vélocité** : lier réellement les deux tableaux (récupérer
   automatiquement la vélocité moyenne d'un tableau de Vélocité existant
-  plutôt que de la ressaisir à la main) — la première vraie référence
-  inter-outils du hub, à faire si le besoin se confirme.
+  plutôt que de la ressaisir à la main).
 - **Gantt : dates calendaires réelles** : remplacer les jours relatifs
-  (J0, J1…) par de vraies dates, avec gestion des week-ends/jours fériés —
-  complexifie le calcul mais rapproche l'outil d'un vrai planning projet.
+  (J0, J1…) par de vraies dates, avec gestion des week-ends/jours fériés.
 - **Gantt : drag-and-drop** : redimensionner les barres à la souris pour
   changer la durée, tracer une dépendance en glissant d'une barre à
-  l'autre. Le moteur CPM (`cpm.js`) n'a pas besoin de changer, seule
-  l'interaction serait à ajouter.
+  l'autre. Le moteur CPM (`cpm.js`) n'a pas besoin de changer.
 - **Gantt ↔ Kanban** : lier une tâche du Gantt à une carte Kanban pour
-  suivre son avancement réel (pas seulement planifié).
+  suivre son avancement réel (pas seulement planifié) — pourrait aussi
+  bien se résoudre naturellement une fois l'étape 2 (table `items`) en place.
 - **Post-mortem ↔ Journal de décisions** : une action corrective issue
   d'un post-mortem pourrait devenir une décision tracée dans le Journal.
-- **OKR : historique de progression** : actuellement seule la valeur
-  courante de chaque résultat clé est gardée ; une table `okr_history`
-  (snapshot horodaté à chaque mise à jour) permettrait un graphique
-  d'évolution dans le temps, comme pour la Vélocité et le Pouls d'équipe.
+- **OKR : historique de progression** : une table `okr_history`
+  (snapshot horodaté) permettrait un graphique d'évolution dans le temps,
+  comme pour la Vélocité et le Pouls d'équipe.
 - **Rétro : plan d'action** : transformer les notes les plus votées en
-  actions assignées (table `retro_actions`), rappelées à la rétro suivante —
-  pourrait réutiliser le modèle de checklist du Post-mortem.
-- **Feature flags : historique d'activation** : tracer qui a activé/désactivé
-  un flag et quand, plutôt que de ne garder que l'état courant.
-- **Comptes / espaces d'équipe** : à ce stade, un simple pseudo suffit ;
-  regrouper tous les tableaux permanents d'une même équipe sous un espace
-  partagé serait la vraie marche vers du "Jira-like" — mais demande une
-  vraie notion de compte, à ne faire que si le besoin se confirme.
+  actions assignées, en réutilisant le modèle de checklist du Post-mortem.
+- **Feature flags : historique d'activation** : tracer qui a activé/
+  désactivé un flag et quand, plutôt que de ne garder que l'état courant.
