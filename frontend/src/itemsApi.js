@@ -15,4 +15,23 @@ export const itemsApi = {
   deleteItem: (orgSlug, itemId) => authRequest(`/api/orgs/${orgSlug}/items/${itemId}`, { method: "DELETE" }),
 
   velocity: (orgSlug) => authRequest(`/api/orgs/${orgSlug}/velocity`),
+
+  // Étape 3 : fiche détail (commentaires, activité, dépendances)
+  getItemDetail: (orgSlug, itemId) => authRequest(`/api/orgs/${orgSlug}/items/${itemId}/detail`),
+  addComment: (orgSlug, itemId, body) => authRequest(`/api/orgs/${orgSlug}/items/${itemId}/comments`, { method: "POST", body: { body } }),
+  addDependency: (orgSlug, itemId, dependsOnId) => authRequest(`/api/orgs/${orgSlug}/items/${itemId}/dependencies`, { method: "POST", body: { dependsOnId } }),
+  removeDependency: (orgSlug, itemId, depId) => authRequest(`/api/orgs/${orgSlug}/items/${itemId}/dependencies/${depId}`, { method: "DELETE" }),
+};
+
+// Étape 4 : membres et invitations
+export const membersApi = {
+  list: (orgSlug) => authRequest(`/api/orgs/${orgSlug}/members`),
+  updateRole: (orgSlug, userId, role) => authRequest(`/api/orgs/${orgSlug}/members/${userId}`, { method: "PATCH", body: { role } }),
+  remove: (orgSlug, userId) => authRequest(`/api/orgs/${orgSlug}/members/${userId}`, { method: "DELETE" }),
+  invite: (orgSlug, email, role) => authRequest(`/api/orgs/${orgSlug}/invitations`, { method: "POST", body: { email, role } }),
+};
+
+export const invitationsApi = {
+  get: (token) => authRequest(`/api/invitations/${token}`),
+  accept: (token) => authRequest(`/api/invitations/${token}/accept`, { method: "POST" }),
 };

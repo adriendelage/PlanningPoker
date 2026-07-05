@@ -2,18 +2,24 @@
 
 Extension de Planning Poker Pro en boîte à outils complète : hub d'accueil,
 persistance PostgreSQL, historique privé (local au navigateur), 14 outils
-en mode "lien" (sans compte), et un **espace de travail connecté** en deux
-étapes — comptes/organisations (étape 1), puis une table `items` partagée
-avec un tableau Kanban + sprints + vélocité **dérivée automatiquement**
-(étape 2, celle-ci) — le tout en parallèle du mode lien, qui reste inchangé.
+en mode "lien" (sans compte), et un **espace de travail connecté** en
+quatre étapes — comptes/organisations (1), table `items` partagée avec
+Kanban + sprints + vélocité dérivée (2), fiche détail avec commentaires/
+activité/dépendances (3), et rôles/permissions avec invitations (4,
+celle-ci) — le tout en parallèle du mode lien, qui reste inchangé.
 
 ## Fichiers à intégrer dans ton repo
 
 | Fichier | Action | Rôle |
 |---|---|---|
-| `backend/items.js` | **Nouveau** | Étape 2 : items & sprints partagés par organisation (Kanban/Vélocité connectés) |
-| `frontend/src/itemsApi.js` | **Nouveau** | Client REST authentifié pour items/sprints |
-| `frontend/src/pages/OrgBoard.jsx` | **Nouveau** | Tableau connecté : Kanban + sprints + vélocité dérivée |
+| `backend/members.js` | **Nouveau** | Étape 4 : gestion des membres et création d'invitations |
+| `backend/invitations.js` | **Nouveau** | Étape 4 : consultation et acceptation d'une invitation par token |
+| `frontend/src/pages/OrgMembers.jsx` | **Nouveau** | Étape 4 : liste des membres, changement de rôle, génération de lien d'invitation |
+| `frontend/src/pages/AcceptInvite.jsx` | **Nouveau** | Étape 4 : page d'acceptation d'invitation (`/invite/:token`) |
+| `frontend/src/pages/ItemDetail.jsx` | **Nouveau** | Étape 3 : fiche détail d'un item |
+| `frontend/src/pages/OrgBoard.jsx` | **Remplace** | Titre de carte cliquable vers le détail (3) + lien "👥 Membres" (4) |
+| `backend/items.js` | **Remplace** | Étapes 2+3 : items, sprints, ET fiche détail (commentaires, activité, dépendances) |
+| `frontend/src/itemsApi.js` | **Remplace** | Client REST : items/sprints/détail (2+3) + membres/invitations (4) |
 | `backend/auth.js` | **Nouveau** | Étape 1 : authentification (register/login/me, JWT, bcrypt, rate-limiting) |
 | `frontend/src/auth.js` | **Nouveau** | Client d'authentification (jeton en localStorage) |
 | `frontend/src/RequireAuth.jsx` | **Nouveau** | Wrapper de protection de route pour `/app/*` |
@@ -258,6 +264,150 @@ raisonnable.
 l'autre se fait via des boutons ← →, exactement comme l'outil Kanban du
 mode lien — cohérence délibérée plutôt qu'ajout d'une librairie de
 glisser-déposer.
+
+## L'espace de travail connecté — étape 3 : fiche détail d'un item
+
+Chaque item a maintenant sa propre page (`/app/:orgSlug/items/:itemId`,
+accessible en cliquant sur le titre d'une carte) : description éditable,
+commentaires, historique d'activité automatique, et dépendances vers
+d'autres items.
+
+**Modèle de données** (3 nouvelles tables) :
+```sql
+item_comments     (id, item_id → items, user_id → users, body, created_at)
+item_activity     (id, item_id → items, user_id → users, action,
+                   details JSONB, created_at)
+item_dependencies (id, item_id → items, depends_on_id → items,
+                   UNIQUE(item_id, depends_on_id))
+```
+`item_dependencies` reprend exactement le modèle de `gantt_dependencies`
+du Gantt en mode lien (deux clés étrangères en CASCADE, contrainte unique
+sur la paire), mais référence `items` au lieu de `gantt_tasks` — la
+réutilisation d'un modèle déjà éprouvé plutôt que d'en inventer un nouveau.
+
+**L'historique d'activité se remplit automatiquement**, sans action
+manuelle : chaque création d'item, changement de statut, modification de
+champ, ajout de commentaire ou de dépendance écrit une ligne dans
+`item_activity` depuis le routeur (`items.js`), avec l'auteur (déduit du
+jeton JWT) et un contexte en JSONB (`{"from":"todo","to":"done"}` pour un
+changement de statut, par exemple — la forme du contexte change selon le
+type d'action, d'où le JSONB plutôt que des colonnes fixes).
+
+**Sécurité — le cas le plus subtil de tout le chantier, testé
+explicitement.** Au-delà de la protection déjà en place (route protégée
+par organisation, `AND org_id = $orgId` dans les requêtes), l'ajout d'une
+dépendance ouvre un risque particulier : un utilisateur pourrait tenter de
+lier un item de **sa** organisation à un item **devinné dans une autre**
+organisation (par exemple en essayant des ID consécutifs). `itemDependencyAdd`
+s'en protège avec un `INSERT ... SELECT ... WHERE EXISTS (...) AND EXISTS (...)`
+qui vérifie que **les deux** items (celui qui dépend et celui dont il
+dépend) appartiennent bien à la **même** organisation avant d'insérer quoi
+que ce soit — si l'un des deux n'y appartient pas, la requête n'insère
+aucune ligne (`rowCount = 0`), et l'API renvoie une erreur `400` plutôt
+qu'un item lié à une donnée d'une autre organisation.
+
+Vérifié par test : création d'un item privé chez Bob, puis tentative
+d'Alice de faire dépendre l'un de ses propres items de cet item de Bob
+— rejetée avec message d'erreur, et vérification directe en base que la
+ligne n'a **jamais** été insérée (pas seulement que l'API a répondu une
+erreur — la donnée elle-même n'existe pas).
+
+**Routes ajoutées** (sous `/api/orgs/:orgSlug`, mêmes protections que le
+reste) :
+```
+GET    /items/:itemId/detail              item + commentaires + activité
+                                           + dépendances + candidats, en
+                                           un seul appel
+POST   /items/:itemId/comments            ajoute un commentaire
+POST   /items/:itemId/dependencies        ajoute une dépendance
+                                           ({dependsOnId})
+DELETE /items/:itemId/dependencies/:depId retire une dépendance
+```
+
+**Simplification assumée** : pas de détection de dépendance circulaire
+pour l'instant (contrairement au moteur CPM du Gantt en mode lien, qui
+détecte les cycles avant de calculer le chemin critique). Ici, il n'y a
+pas encore de calcul qui en dépendrait (pas de Gantt connecté — voir
+pistes plus bas), donc un cycle serait juste... deux items qui se
+pointent mutuellement, sans conséquence fonctionnelle immédiate. À
+surveiller si un Gantt connecté est ajouté un jour : il faudra alors
+réutiliser la détection de cycle de `cpm.js`.
+
+## L'espace de travail connecté — étape 4 : rôles et permissions
+
+Jusqu'ici, `memberships.role` ne connaissait que `owner` (celui créé
+automatiquement à l'inscription). Cette étape ouvre vraiment l'espace de
+travail à plusieurs personnes par équipe, avec trois rôles hiérarchiques
+et un mécanisme d'invitation.
+
+**Modèle de rôles** : `owner` > `admin` > `member`.
+- **member** : accès complet aux items/sprints/commentaires (aucune
+  restriction ajoutée sur les routes de l'étape 2/3 — n'importe quel
+  membre peut créer/modifier/supprimer des items, c'est délibéré : la
+  granularité fine par action n'était pas le sujet de cette étape).
+- **admin** : en plus, peut inviter de nouveaux membres (avec le rôle
+  `member` ou `admin`, jamais `owner`).
+- **owner** : en plus, peut inviter avec n'importe quel rôle (y compris
+  `owner`), changer le rôle de quiconque, et retirer un membre.
+
+**Pas d'envoi d'email réel.** Comme documenté dans `backend/members.js` :
+aucun service comme SendGrid ou Resend n'est configuré dans ce projet.
+`POST /invitations` génère un jeton aléatoire (`crypto.randomBytes(24)`)
+et renvoie un lien (`/invite/<token>`) que l'interface affiche avec un
+bouton "copier" — à partager soi-même par Slack, email, etc. C'est une
+simplification assumée, pas un oubli : ajouter un vrai envoi automatique
+demanderait une dépendance à un service externe supplémentaire.
+
+**Sécurité — le point le plus important de cette étape.** Un lien
+d'invitation, une fois créé, est une donnée qui peut fuiter (transférée
+par erreur, interceptée...). Sans protection supplémentaire, n'importe
+qui tombant sur ce lien pourrait rejoindre l'organisation. La protection :
+**seul le titulaire de l'adresse email invitée peut accepter** —
+`POST /invitations/:token/accept` compare `req.authUser.email` (tiré du
+jeton JWT du compte connecté) à l'email enregistré sur l'invitation, et
+rejette avec `403` en cas de mismatch. `GET /invitations/:token` expose
+ce statut de correspondance (`emailMatches`) pour que l'interface prévienne
+l'utilisateur *avant* qu'il ne clique sur "Accepter" et essuie un refus.
+
+Vérifié par test : Bob (compte existant, email différent) consulte
+l'invitation destinée à Carol — l'API répond `emailMatches: false` — puis
+tente de l'accepter quand même : `403`. Carol, elle-même, accepte
+normalement.
+
+**Protections supplémentaires testées :**
+- Un `member` ne peut pas créer d'invitation (`403` — réservé à
+  `admin`/`owner`).
+- Un `admin` ne peut pas inviter avec le rôle `owner`, ni changer le rôle
+  de qui que ce soit ou retirer un membre (ces trois actions sont
+  `owner`-only) — empêche un admin de s'auto-promouvoir ou de promouvoir
+  un complice au rang de propriétaire.
+- **Protection du dernier propriétaire** : impossible de rétrograder ou
+  retirer le dernier `owner` d'une organisation (`memberUpdateRole`/
+  `memberRemove` comptent les owners restants avant d'agir) — sinon
+  l'organisation se retrouverait dans un état dont personne n'aurait plus
+  le droit de la sortir.
+- Une invitation ne peut être acceptée qu'une fois (`410 Gone` en cas de
+  réutilisation) et expire après 7 jours (même durée que le jeton JWT,
+  pour rester cohérent).
+
+**Routes ajoutées :**
+```
+GET    /api/orgs/:orgSlug/members            liste les membres (tout membre)
+PATCH  /api/orgs/:orgSlug/members/:userId     change un rôle (owner uniquement)
+DELETE /api/orgs/:orgSlug/members/:userId     retire un membre (owner uniquement)
+POST   /api/orgs/:orgSlug/invitations         crée une invitation (admin/owner)
+GET    /api/invitations/:token                consulte une invitation (compte
+                                               connecté requis, pas besoin
+                                               d'être déjà membre)
+POST   /api/invitations/:token/accept         accepte l'invitation (email
+                                               du compte connecté doit
+                                               correspondre)
+```
+Les deux dernières routes sont montées séparément
+(`backend/invitations.js`, pas `backend/members.js`) car elles sont
+identifiées par le **token**, pas par un slug d'organisation dont
+l'appelant serait déjà membre — c'est justement l'inverse ici. Protégées
+par `requireAuth` seul, jamais par `requireOrgMember`.
 
 ## L'outil Rétrospective
 
@@ -616,6 +766,32 @@ ligne dans `sessions` — elle n'a pas de backend du tout. Ces données ne
 sont plus exposées via HTTP (voir plus haut), mais `db.getSession(id)`
 reste disponible côté serveur pour un futur usage interne (export, admin).
 
+### Schéma — espace de travail connecté
+
+Famille de tables complètement séparée de celles ci-dessus (aucune clé
+étrangère vers `sessions`) :
+```sql
+users            (id, email UNIQUE, password_hash, name, created_at)
+organizations    (id, name, slug UNIQUE, created_at)
+memberships      (id, user_id → users, org_id → organizations, role,
+                  UNIQUE(user_id, org_id))
+org_invitations  (id, org_id → organizations, email, role, token UNIQUE,
+                  invited_by → users, expires_at, accepted_at)
+sprints          (id, org_id → organizations, name, goal, start_date,
+                  end_date, created_at)
+items            (id, org_id → organizations, title, description, status,
+                  assignee, story_points, sprint_id → sprints, position,
+                  created_by → users, created_at, updated_at)
+item_comments    (id, item_id → items, user_id → users, body, created_at)
+item_activity    (id, item_id → items, user_id → users, action,
+                  details JSONB, created_at)
+item_dependencies(id, item_id → items, depends_on_id → items,
+                  UNIQUE(item_id, depends_on_id))
+```
+`role` (dans `memberships` et `org_invitations`) ∈ `owner` / `admin` /
+`member`, validé côté application (pas de contrainte `CHECK` en base, pour
+rester cohérent avec le style déjà utilisé pour `status` dans `items`).
+
 ## Dev local
 
 ```bash
@@ -646,28 +822,39 @@ ajoute dans `vite.config.js` (section `server.proxy`) :
 - Le Pouls d'équipe utilise un `UNIQUE(session_id, name, day)` avec
   `ON CONFLICT DO UPDATE` pour éviter les doublons de check-in — vérifié
   par test qu'un second check-in le même jour met à jour plutôt que dupliquer.
+- La protection du dernier propriétaire d'une organisation (`memberUpdateRole`/
+  `memberRemove`) compte les owners restants avant d'agir — vérifiée par
+  test qu'une organisation ne peut jamais se retrouver sans aucun owner.
 
 ## Pistes pour la suite
 
 Les 15 outils du hub sont tous fonctionnels (14 avec backend + la Roue de
 décision, 100 % client), et l'espace de travail connecté a maintenant ses
-deux premières étapes en place : comptes/organisations (étape 1) et la
-table `items` partagée avec Kanban + sprints + vélocité dérivée (étape 2).
-Pistes pour aller plus loin :
+quatre premières étapes en place : comptes/organisations (1), la table
+`items` partagée avec Kanban + sprints + vélocité dérivée (2), la fiche
+détail avec commentaires/activité/dépendances (3), et rôles/permissions
+avec invitations (4). Pistes pour aller plus loin :
 
 **La suite logique du chantier "façon Jira" :**
-- **Étape 3 — fiche détail d'un item** : commentaires, historique
-  d'activité, liens entre items (bloque/dépend de — le modèle de
-  dépendances du Gantt actuel en mode lien est réutilisable presque tel quel).
-- **Rôles et permissions** : pour l'instant, `memberships.role` ne connaît
-  que `owner` ; ajouter `member`/`admin` et des invitations par email
-  serait nécessaire avant d'ouvrir l'espace à plusieurs personnes par équipe.
-- **Gantt connecté** : une vue Gantt + chemin critique (réutilisant le
-  moteur `cpm.js` existant) sur les `items` d'un sprint, à partir de leur
-  éventuelle relation de dépendance (nouvelle table `item_dependencies`,
-  sur le modèle de `gantt_dependencies`).
+- **Gantt connecté** : une vue Gantt + chemin critique sur les `items`
+  d'un sprint, réutilisant à la fois `item_dependencies` (déjà en place
+  depuis l'étape 3) et le moteur `cpm.js` du Gantt en mode lien — il
+  faudrait alors aussi reprendre sa détection de cycle, absente pour
+  l'instant côté `item_dependencies` (voir la section dédiée plus haut).
+- **Détection de dépendance circulaire** : à ajouter dès qu'un calcul
+  (comme un Gantt connecté) dépendra effectivement de l'absence de cycle
+  dans `item_dependencies` — pas nécessaire tant que les dépendances ne
+  servent qu'à l'affichage informatif sur la fiche détail.
+- **Permissions à granularité plus fine** : pour l'instant, tout `member`
+  peut créer/modifier/supprimer n'importe quel item — pas de distinction
+  entre "peut voir" et "peut éditer", ni de restriction par sprint ou par
+  assignation. À affiner si le besoin se fait sentir avec l'usage réel.
+- **Envoi d'email réel pour les invitations** : actuellement un lien à
+  copier/partager manuellement (voir la section étape 4) ; brancher un
+  service comme Resend ou SendGrid automatiserait l'envoi, au prix d'une
+  dépendance externe et d'une clé d'API supplémentaire à gérer.
 
-**Sur les items (étape 2) :**
+**Sur les items (étapes 2 et 3) :**
 - **Temps réel** : le tableau connecté recharge ses données après chaque
   action plutôt que de se synchroniser en direct entre plusieurs personnes
   (contrairement à tous les outils du mode lien). Ajouter ça demande

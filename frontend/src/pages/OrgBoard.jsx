@@ -10,10 +10,13 @@ const COLUMNS = [
   { status: "done", label: "Terminé", accent: "#00f5d4" },
 ];
 
-function ItemCard({ item, onMove, onDelete, colIndex }) {
+function ItemCard({ item, onMove, onDelete, colIndex, orgSlug }) {
   return (
     <div style={{ background: "#1a1a2e", border: "1px solid #2a2a44", borderRadius: 10, padding: "11px 12px", marginBottom: 8 }}>
-      <div style={{ fontSize: 14.5, color: "#ddd", marginBottom: 6 }}>{item.title}</div>
+      <a href={`/app/${orgSlug}/items/${item.id}`}
+        style={{ display: "block", fontSize: 14.5, color: "#ddd", marginBottom: 6, textDecoration: "none" }}>
+        {item.title}
+      </a>
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#777" }}>
         {item.assignee && <span>👤 {item.assignee}</span>}
         {item.story_points != null && (
@@ -144,6 +147,10 @@ export default function OrgBoard() {
         <header style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: 8 }}>
           <a href="/app" style={{ color: "#666", fontSize: 14, textDecoration: "none" }}>← Espace de travail</a>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>🏢 {org.name}</h1>
+          <a href={`/app/${orgSlug}/members`}
+            style={{ marginLeft: "auto", fontSize: 13, color: "#aaa", textDecoration: "none", border: "1px solid #333", borderRadius: 999, padding: "5px 12px" }}>
+            👥 Membres
+          </a>
         </header>
         <p style={{ margin: "0 0 20px", fontSize: 12.5, color: "#555" }}>
           Tableau connecté — Kanban, sprints et vélocité partagent la même donnée (table "items").
@@ -206,7 +213,7 @@ export default function OrgBoard() {
                   <span style={{ fontSize: 12, color: "#555" }}>{colItems.length}</span>
                 </div>
                 {colItems.map(item => (
-                  <ItemCard key={item.id} item={item} colIndex={i} onMove={moveItem} onDelete={deleteItem} />
+                  <ItemCard key={item.id} item={item} colIndex={i} onMove={moveItem} onDelete={deleteItem} orgSlug={orgSlug} />
                 ))}
                 {colItems.length === 0 && <p style={{ color: "#444", fontSize: 13 }}>Aucun item.</p>}
               </div>

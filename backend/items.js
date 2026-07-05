@@ -108,6 +108,7 @@ router.post("/items", async (req, res) => {
       sprintId: req.body?.sprintId || null,
     }, req.authUser.sub);
 
+    await db.itemActivityLog(item.id, req.authUser.sub, "created", { title });
     res.status(201).json(item);
   } catch (e) {
     console.error("Erreur POST /items:", e.message);
@@ -117,6 +118,9 @@ router.post("/items", async (req, res) => {
 
 router.patch("/items/:itemId", async (req, res) => {
   try {
+    const before = await db.itemGetById(req.params.itemId, req.org.id);
+    if (!before) return res.status(404).json({ error: "Item introuvable dans cette organisation." });
+
     const fields = {};
     if (req.body?.title != null) fields.title = String(req.body.title).trim().slice(0, 200);
     if (req.body?.description != null) fields.description = String(req.body.description).trim().slice(0, 2000);
@@ -135,6 +139,18 @@ router.patch("/items/:itemId", async (req, res) => {
 
     const item = await db.itemUpdate(req.params.itemId, req.org.id, fields);
     if (!item) return res.status(404).json({ error: "Item introuvable dans cette organisation." });
+
+    // Journalisation : un événement dédié pour le changement de statut
+    // (le plus significatif pour l'historique visible), un événement
+    // générique pour le reste.
+    if (fields.status && fields.status !== before.status) {
+      await db.itemActivityLog(item.id, req.authUser.sub, "status_changed", { from: before.status, to: fields.status });
+    }
+    const otherFields = Object.keys(fields).filter(k => k !== "status" && k !== "position");
+    if (otherFields.length > 0) {
+      await db.itemActivityLog(item.id, req.authUser.sub, "updated", { fields: otherFields });
+    }
+
     res.json(item);
   } catch (e) {
     console.error("Erreur PATCH /items/:itemId:", e.message);
@@ -153,4 +169,87 @@ router.delete("/items/:itemId", async (req, res) => {
   }
 });
 
-module.exports = { router };
+// ── Étape 3 : fiche détail (commentaires, activité, dépendances) ────────────
+// Une seule route renvoie tout ce dont la fiche a besoin en un appel :
+// l'item, ses commentaires, son historique, ses dépendances, et la liste
+// des autres items de l'organisation (candidats pour une nouvelle dépendance).
+
+router.get("/items/:itemId/detail", async (req, res) => {
+  try {
+    const item = await db.itemGetById(req.params.itemId, req.org.id);
+    if (!item) return res.status(404).json({ error: "Item introuvable dans cette organisation." });
+
+    const [comments, activity, dependencies, allItems] = await Promise.all([
+      db.itemCommentsList(item.id),
+      db.itemActivityList(item.id),
+      db.itemDependenciesList(item.id),
+      db.itemsList(req.org.id),
+    ]);
+
+    res.json({
+      item,
+      comments,
+      activity,
+      dependencies,
+      candidates: allItems.filter(i => i.id !== item.id).map(i => ({ id: i.id, title: i.title, status: i.status })),
+    });
+  } catch (e) {
+    console.error("Erreur GET /items/:itemId/detail:", e.message);
+    res.status(500).json({ error: "Erreur serveur." });
+  }
+});
+
+router.post("/items/:itemId/comments", async (req, res) => {
+  try {
+    const item = await db.itemGetById(req.params.itemId, req.org.id);
+    if (!item) return res.status(404).json({ error: "Item introuvable dans cette organisation." });
+
+    const body = String(req.body?.body || "").trim().slice(0, 2000);
+    if (!body) return res.status(400).json({ error: "Le commentaire ne peut pas être vide." });
+
+    const comment = await db.itemCommentAdd(item.id, req.authUser.sub, body);
+    await db.itemActivityLog(item.id, req.authUser.sub, "comment_added", {});
+    res.status(201).json(comment);
+  } catch (e) {
+    console.error("Erreur POST /items/:itemId/comments:", e.message);
+    res.status(500).json({ error: "Erreur serveur." });
+  }
+});
+
+router.post("/items/:itemId/dependencies", async (req, res) => {
+  try {
+    const item = await db.itemGetById(req.params.itemId, req.org.id);
+    if (!item) return res.status(404).json({ error: "Item introuvable dans cette organisation." });
+
+    const dependsOnId = parseInt(req.body?.dependsOnId);
+    if (!dependsOnId || dependsOnId === item.id) {
+      return res.status(400).json({ error: "Dépendance invalide." });
+    }
+
+    const added = await db.itemDependencyAdd(item.id, dependsOnId, req.org.id);
+    if (!added) {
+      return res.status(400).json({ error: "Impossible d'ajouter cette dépendance (item introuvable dans cette organisation, ou déjà présente)." });
+    }
+    await db.itemActivityLog(item.id, req.authUser.sub, "dependency_added", { dependsOnId });
+    res.status(201).json({ ok: true });
+  } catch (e) {
+    console.error("Erreur POST /items/:itemId/dependencies:", e.message);
+    res.status(500).json({ error: "Erreur serveur." });
+  }
+});
+
+router.delete("/items/:itemId/dependencies/:depId", async (req, res) => {
+  try {
+    const item = await db.itemGetById(req.params.itemId, req.org.id);
+    if (!item) return res.status(404).json({ error: "Item introuvable dans cette organisation." });
+
+    await db.itemDependencyRemove(item.id, req.params.depId);
+    await db.itemActivityLog(item.id, req.authUser.sub, "dependency_removed", { dependsOnId: Number(req.params.depId) });
+    res.status(204).end();
+  } catch (e) {
+    console.error("Erreur DELETE /items/:itemId/dependencies/:depId:", e.message);
+    res.status(500).json({ error: "Erreur serveur." });
+  }
+});
+
+module.exports = { router, requireOrgMember };

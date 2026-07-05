@@ -263,6 +263,60 @@ async function init() {
     CREATE INDEX IF NOT EXISTS idx_items_org ON items (org_id);
     CREATE INDEX IF NOT EXISTS idx_sprints_org ON sprints (org_id);
 
+    -- ═══ Étape 3 : fiche détail d'un item ═══
+    -- Commentaires, historique d'activité et dépendances entre items —
+    -- le modèle de dépendances reprend exactement celui du Gantt en mode
+    -- lien (gantt_dependencies), mais référence items au lieu de gantt_tasks.
+
+    CREATE TABLE IF NOT EXISTS item_comments (
+      id          SERIAL PRIMARY KEY,
+      item_id     INT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+      user_id     INT REFERENCES users(id) ON DELETE SET NULL,
+      body        TEXT NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- "action" typiques : created, status_changed, updated, comment_added,
+    -- dependency_added, dependency_removed. "details" garde le contexte
+    -- (ex: {"from":"todo","to":"done"}) en JSONB plutôt qu'en colonnes
+    -- fixes, puisque chaque type d'action a une forme différente.
+    CREATE TABLE IF NOT EXISTS item_activity (
+      id          SERIAL PRIMARY KEY,
+      item_id     INT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+      user_id     INT REFERENCES users(id) ON DELETE SET NULL,
+      action      TEXT NOT NULL,
+      details     JSONB NOT NULL DEFAULT '{}',
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS item_dependencies (
+      id             SERIAL PRIMARY KEY,
+      item_id        INT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+      depends_on_id  INT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+      UNIQUE (item_id, depends_on_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_item_comments_item ON item_comments (item_id);
+    CREATE INDEX IF NOT EXISTS idx_item_activity_item ON item_activity (item_id);
+
+    -- ═══ Étape 4 : rôles et permissions ═══
+    -- Pas d'envoi d'email réel (aucun service comme SendGrid configuré
+    -- dans ce projet) : une invitation génère un lien à partager
+    -- manuellement (voir backend/invitations.js), pas un email automatique.
+    CREATE TABLE IF NOT EXISTS org_invitations (
+      id           SERIAL PRIMARY KEY,
+      org_id       INT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      email        TEXT NOT NULL,
+      role         TEXT NOT NULL DEFAULT 'member',
+      token        TEXT UNIQUE NOT NULL,
+      invited_by   INT REFERENCES users(id) ON DELETE SET NULL,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      expires_at   TIMESTAMPTZ NOT NULL,
+      accepted_at  TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_invitations_org ON org_invitations (org_id);
+
     CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions (created_at DESC);
   `);
   console.log("✅ Base de données initialisée");
@@ -1051,6 +1105,193 @@ async function velocityBySprintForOrg(orgId) {
   return rows;
 }
 
+// ── Étape 3 : fiche détail d'un item ──────────────────────────────────────────
+
+async function itemGetById(itemId, orgId) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(
+    `SELECT * FROM items WHERE id = $1 AND org_id = $2`,
+    [itemId, orgId]
+  );
+  return rows[0] || null;
+}
+
+async function itemCommentsList(itemId) {
+  if (!enabled()) return [];
+  const { rows } = await pool.query(
+    `SELECT c.id, c.body, c.created_at, u.id AS user_id, u.name AS user_name
+     FROM item_comments c LEFT JOIN users u ON u.id = c.user_id
+     WHERE c.item_id = $1 ORDER BY c.created_at ASC`,
+    [itemId]
+  );
+  return rows;
+}
+
+async function itemCommentAdd(itemId, userId, body) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO item_comments (item_id, user_id, body) VALUES ($1, $2, $3) RETURNING id, body, created_at`,
+    [itemId, userId, body]
+  );
+  return rows[0];
+}
+
+async function itemActivityList(itemId) {
+  if (!enabled()) return [];
+  const { rows } = await pool.query(
+    `SELECT a.id, a.action, a.details, a.created_at, u.name AS user_name
+     FROM item_activity a LEFT JOIN users u ON u.id = a.user_id
+     WHERE a.item_id = $1 ORDER BY a.created_at DESC`,
+    [itemId]
+  );
+  return rows;
+}
+
+async function itemActivityLog(itemId, userId, action, details = {}) {
+  if (!enabled()) return;
+  await pool.query(
+    `INSERT INTO item_activity (item_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+    [itemId, userId, action, JSON.stringify(details)]
+  );
+}
+
+async function itemDependenciesList(itemId) {
+  if (!enabled()) return [];
+  const { rows } = await pool.query(
+    `SELECT i.id, i.title, i.status
+     FROM item_dependencies d JOIN items i ON i.id = d.depends_on_id
+     WHERE d.item_id = $1 ORDER BY i.id`,
+    [itemId]
+  );
+  return rows;
+}
+
+// dependsOnId doit appartenir à la MÊME organisation que itemId — vérifié
+// par le routeur (items.js) avant l'appel, mais on revérifie ici aussi
+// (défense en profondeur, comme pour itemUpdate/itemDelete) via la clause
+// JOIN sur org_id des deux items.
+async function itemDependencyAdd(itemId, dependsOnId, orgId) {
+  if (!enabled()) return false;
+  const { rowCount } = await pool.query(
+    `INSERT INTO item_dependencies (item_id, depends_on_id)
+     SELECT $1, $2
+     WHERE EXISTS (SELECT 1 FROM items WHERE id = $1 AND org_id = $3)
+       AND EXISTS (SELECT 1 FROM items WHERE id = $2 AND org_id = $3)
+     ON CONFLICT DO NOTHING`,
+    [itemId, dependsOnId, orgId]
+  );
+  return rowCount > 0;
+}
+
+async function itemDependencyRemove(itemId, dependsOnId) {
+  if (!enabled()) return;
+  await pool.query(
+    `DELETE FROM item_dependencies WHERE item_id = $1 AND depends_on_id = $2`,
+    [itemId, dependsOnId]
+  );
+}
+
+// ── Étape 4 : membres et invitations ──────────────────────────────────────────
+
+async function membersList(orgId) {
+  if (!enabled()) return [];
+  const { rows } = await pool.query(
+    `SELECT u.id AS user_id, u.name, u.email, m.role, m.created_at AS joined_at
+     FROM memberships m JOIN users u ON u.id = m.user_id
+     WHERE m.org_id = $1 ORDER BY m.created_at`,
+    [orgId]
+  );
+  return rows;
+}
+
+async function countOwners(orgId) {
+  if (!enabled()) return 0;
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM memberships WHERE org_id = $1 AND role = 'owner'`,
+    [orgId]
+  );
+  return rows[0].n;
+}
+
+// Empêche de se retrouver avec une organisation sans aucun propriétaire —
+// un état dont on ne pourrait plus sortir (personne n'aurait alors le
+// droit de promouvoir qui que ce soit).
+async function memberUpdateRole(orgId, userId, newRole) {
+  if (!enabled()) return { error: "DB_DISABLED" };
+  const current = await pool.query(
+    `SELECT role FROM memberships WHERE org_id = $1 AND user_id = $2`,
+    [orgId, userId]
+  );
+  if (current.rows.length === 0) return { error: "NOT_FOUND" };
+  if (current.rows[0].role === "owner" && newRole !== "owner") {
+    const owners = await countOwners(orgId);
+    if (owners <= 1) return { error: "LAST_OWNER" };
+  }
+  const { rows } = await pool.query(
+    `UPDATE memberships SET role = $3 WHERE org_id = $1 AND user_id = $2 RETURNING role`,
+    [orgId, userId, newRole]
+  );
+  return { role: rows[0].role };
+}
+
+async function memberRemove(orgId, userId) {
+  if (!enabled()) return { error: "DB_DISABLED" };
+  const current = await pool.query(
+    `SELECT role FROM memberships WHERE org_id = $1 AND user_id = $2`,
+    [orgId, userId]
+  );
+  if (current.rows.length === 0) return { error: "NOT_FOUND" };
+  if (current.rows[0].role === "owner") {
+    const owners = await countOwners(orgId);
+    if (owners <= 1) return { error: "LAST_OWNER" };
+  }
+  await pool.query(`DELETE FROM memberships WHERE org_id = $1 AND user_id = $2`, [orgId, userId]);
+  return { ok: true };
+}
+
+async function invitationCreate(orgId, email, role, invitedBy, token, expiresAt) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO org_invitations (org_id, email, role, token, invited_by, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+    [orgId, email, role, token, invitedBy, expiresAt]
+  );
+  return rows[0];
+}
+
+async function invitationFindByToken(token) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(
+    `SELECT i.*, o.name AS org_name, o.slug AS org_slug
+     FROM org_invitations i JOIN organizations o ON o.id = i.org_id
+     WHERE i.token = $1`,
+    [token]
+  );
+  return rows[0] || null;
+}
+
+// Transaction : crée l'adhésion (sans écraser un rôle existant plus élevé,
+// via ON CONFLICT DO NOTHING) puis marque l'invitation comme acceptée.
+async function invitationAccept(invitationId, userId, orgId, role) {
+  if (!enabled()) return;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO memberships (user_id, org_id, role) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, org_id) DO NOTHING`,
+      [userId, orgId, role]
+    );
+    await client.query(`UPDATE org_invitations SET accepted_at = now() WHERE id = $1`, [invitationId]);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 async function finishSession(id) {
   if (!enabled()) return;
   await pool.query(
@@ -1206,5 +1447,10 @@ module.exports = {
   orgFindBySlug, orgCheckMembership,
   sprintsList, sprintCreate,
   itemsList, itemCreate, itemUpdate, itemDelete, velocityBySprintForOrg,
+  itemGetById, itemCommentsList, itemCommentAdd,
+  itemActivityList, itemActivityLog,
+  itemDependenciesList, itemDependencyAdd, itemDependencyRemove,
+  membersList, memberUpdateRole, memberRemove,
+  invitationCreate, invitationFindByToken, invitationAccept,
   finishSession, listSessions, getSession
 };
