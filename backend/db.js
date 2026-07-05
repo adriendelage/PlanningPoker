@@ -229,6 +229,40 @@ async function init() {
       UNIQUE (user_id, org_id)
     );
 
+    -- ═══ Étape 2 : table "items" partagée (le coeur du mode connecté) ═══
+    -- Contrairement aux tables des outils en mode lien (kanban_cards,
+    -- gantt_tasks, velocity_sprints...), qui restent isolées par outil,
+    -- ici un seul objet ("item") traverse tout : le tableau, les sprints,
+    -- la vélocité calculée. Rattaché à une organisation, pas à une session.
+
+    CREATE TABLE IF NOT EXISTS sprints (
+      id          SERIAL PRIMARY KEY,
+      org_id      INT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      name        TEXT NOT NULL,
+      goal        TEXT,
+      start_date  DATE,
+      end_date    DATE,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS items (
+      id            SERIAL PRIMARY KEY,
+      org_id        INT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      title         TEXT NOT NULL,
+      description   TEXT NOT NULL DEFAULT '',
+      status        TEXT NOT NULL DEFAULT 'todo',
+      assignee      TEXT,
+      story_points  INT,
+      sprint_id     INT REFERENCES sprints(id) ON DELETE SET NULL,
+      position      INT NOT NULL DEFAULT 0,
+      created_by    INT REFERENCES users(id) ON DELETE SET NULL,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_items_org ON items (org_id);
+    CREATE INDEX IF NOT EXISTS idx_sprints_org ON sprints (org_id);
+
     CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions (created_at DESC);
   `);
   console.log("✅ Base de données initialisée");
@@ -901,6 +935,122 @@ async function authGetUserOrgs(userId) {
   return rows;
 }
 
+// ═══ Étape 2 : organisations, sprints, items ═════════════════════════════════
+
+async function orgFindBySlug(slug) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(`SELECT * FROM organizations WHERE slug = $1`, [slug]);
+  return rows[0] || null;
+}
+
+async function orgCheckMembership(userId, orgId) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(
+    `SELECT role FROM memberships WHERE user_id = $1 AND org_id = $2`,
+    [userId, orgId]
+  );
+  return rows[0] || null;
+}
+
+async function sprintsList(orgId) {
+  if (!enabled()) return [];
+  const { rows } = await pool.query(
+    `SELECT * FROM sprints WHERE org_id = $1 ORDER BY created_at DESC`,
+    [orgId]
+  );
+  return rows;
+}
+
+async function sprintCreate(orgId, { name, goal, startDate, endDate }) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO sprints (org_id, name, goal, start_date, end_date)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [orgId, name, goal || null, startDate || null, endDate || null]
+  );
+  return rows[0];
+}
+
+async function itemsList(orgId, sprintId) {
+  if (!enabled()) return [];
+  const params = [orgId];
+  let where = "org_id = $1";
+  if (sprintId === "backlog") {
+    where += " AND sprint_id IS NULL";
+  } else if (sprintId) {
+    params.push(sprintId);
+    where += ` AND sprint_id = $${params.length}`;
+  }
+  const { rows } = await pool.query(
+    `SELECT * FROM items WHERE ${where} ORDER BY position, id`,
+    params
+  );
+  return rows;
+}
+
+async function itemCreate(orgId, { title, description, status, assignee, storyPoints, sprintId }, createdBy) {
+  if (!enabled()) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO items (org_id, title, description, status, assignee, story_points, sprint_id, position, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7,
+             (SELECT COALESCE(MAX(position), -1) + 1 FROM items WHERE org_id = $1 AND status = $4),
+             $8)
+     RETURNING *`,
+    [orgId, title, description || "", status || "todo", assignee || null, storyPoints ?? null, sprintId || null, createdBy]
+  );
+  return rows[0];
+}
+
+// Toutes les mutations incluent "AND org_id = $orgId" dans le WHERE — même
+// si l'appelant a déjà vérifié son appartenance à l'organisation, ça évite
+// qu'un identifiant d'item deviné/volé permette de modifier un item d'une
+// AUTRE organisation (défense en profondeur contre les IDOR).
+async function itemUpdate(itemId, orgId, fields) {
+  if (!enabled()) return null;
+  const allowed = ["title", "description", "status", "assignee", "story_points", "sprint_id", "position"];
+  const sets = [], params = [itemId, orgId];
+  for (const [key, value] of Object.entries(fields)) {
+    if (!allowed.includes(key)) continue;
+    params.push(value);
+    sets.push(`${key} = $${params.length}`);
+  }
+  if (sets.length === 0) return null;
+  const { rows } = await pool.query(
+    `UPDATE items SET ${sets.join(", ")}, updated_at = now()
+     WHERE id = $1 AND org_id = $2 RETURNING *`,
+    params
+  );
+  return rows[0] || null;
+}
+
+async function itemDelete(itemId, orgId) {
+  if (!enabled()) return false;
+  const { rowCount } = await pool.query(
+    `DELETE FROM items WHERE id = $1 AND org_id = $2`,
+    [itemId, orgId]
+  );
+  return rowCount > 0;
+}
+
+// Vélocité calculée depuis les items eux-mêmes (status='done'), groupée
+// par sprint — la démonstration concrète que la vélocité n'est plus
+// ressaisie à la main comme en mode lien, mais dérivée du tableau partagé.
+async function velocityBySprintForOrg(orgId) {
+  if (!enabled()) return [];
+  const { rows } = await pool.query(
+    `SELECT s.id AS sprint_id, s.name AS sprint_name,
+            COALESCE(SUM(i.story_points) FILTER (WHERE i.status = 'done'), 0) AS completed_points,
+            COALESCE(SUM(i.story_points), 0) AS total_points
+     FROM sprints s
+     LEFT JOIN items i ON i.sprint_id = s.id
+     WHERE s.org_id = $1
+     GROUP BY s.id, s.name
+     ORDER BY s.created_at DESC`,
+    [orgId]
+  );
+  return rows;
+}
+
 async function finishSession(id) {
   if (!enabled()) return;
   await pool.query(
@@ -1053,5 +1203,8 @@ module.exports = {
   flagAdd, flagToggle, flagUpdate, flagDelete, flagLoadBoard,
   pulseCheckin, pulseLoadBoard,
   authFindUserByEmail, authRegister, authGetUserOrgs,
+  orgFindBySlug, orgCheckMembership,
+  sprintsList, sprintCreate,
+  itemsList, itemCreate, itemUpdate, itemDelete, velocityBySprintForOrg,
   finishSession, listSessions, getSession
 };

@@ -55,16 +55,20 @@ export default function AppHome() {
               <span style={{ fontSize: 11, color: "#00f5d4", border: "1px solid #00f5d444", borderRadius: 999, padding: "2px 8px" }}>
                 {org.role}
               </span>
+              <a href={`/app/${org.slug}/board`}
+                style={{ fontSize: 12.5, color: "#00f5d4", border: "1px solid #00f5d444", borderRadius: 999, padding: "4px 12px", textDecoration: "none", fontWeight: 600 }}>
+                Ouvrir le tableau →
+              </a>
             </div>
           ))}
         </div>
 
         <div style={{ background: "#111", border: "1px dashed #333", borderRadius: 14, padding: "24px 22px", textAlign: "center", color: "#666" }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>🚧</div>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
           <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6 }}>
-            L'authentification fonctionne — étape 1 terminée.<br />
-            Le tableau d'items connecté (Kanban/Gantt/Vélocité interconnectés)
-            arrive à l'étape 2.
+            Étape 2 en place : le tableau connecté ci-dessus (Kanban, sprints,
+            vélocité) lit et écrit une table "items" partagée par organisation —
+            fini les silos indépendants du mode lien.
           </p>
         </div>
 

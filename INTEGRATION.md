@@ -2,21 +2,24 @@
 
 Extension de Planning Poker Pro en boîte à outils complète : hub d'accueil,
 persistance PostgreSQL, historique privé (local au navigateur), 14 outils
-en mode "lien" (sans compte), et le tout début d'un **espace de travail
-connecté** (comptes, organisations) — étape 1 d'un chantier plus large vers
-un mode "interconnecté façon Jira", en parallèle du mode lien qui reste
-inchangé.
+en mode "lien" (sans compte), et un **espace de travail connecté** en deux
+étapes — comptes/organisations (étape 1), puis une table `items` partagée
+avec un tableau Kanban + sprints + vélocité **dérivée automatiquement**
+(étape 2, celle-ci) — le tout en parallèle du mode lien, qui reste inchangé.
 
 ## Fichiers à intégrer dans ton repo
 
 | Fichier | Action | Rôle |
 |---|---|---|
-| `backend/auth.js` | **Nouveau** | Authentification : register/login/me, JWT, bcrypt, rate-limiting |
+| `backend/items.js` | **Nouveau** | Étape 2 : items & sprints partagés par organisation (Kanban/Vélocité connectés) |
+| `frontend/src/itemsApi.js` | **Nouveau** | Client REST authentifié pour items/sprints |
+| `frontend/src/pages/OrgBoard.jsx` | **Nouveau** | Tableau connecté : Kanban + sprints + vélocité dérivée |
+| `backend/auth.js` | **Nouveau** | Étape 1 : authentification (register/login/me, JWT, bcrypt, rate-limiting) |
 | `frontend/src/auth.js` | **Nouveau** | Client d'authentification (jeton en localStorage) |
 | `frontend/src/RequireAuth.jsx` | **Nouveau** | Wrapper de protection de route pour `/app/*` |
 | `frontend/src/pages/Login.jsx` | **Nouveau** | Connexion |
 | `frontend/src/pages/Register.jsx` | **Nouveau** | Inscription (crée compte + organisation) |
-| `frontend/src/pages/AppHome.jsx` | **Nouveau** | Page protégée de l'espace de travail (étape 1 : preuve que l'auth fonctionne) |
+| `frontend/src/pages/AppHome.jsx` | **Remplace** | Espace de travail : liste des organisations + lien vers leur tableau |
 | `backend/db.js` | **Nouveau** | Module PostgreSQL (pool `pg`, schéma auto-créé, dégradation gracieuse sans DB) |
 | `backend/server.js` | **Remplace** | Serveur + persistance + événements Rétro/Daily/Kanban/Vélocité/OKR — **aucun endpoint public de liste** |
 | `backend/package.json` | **Remplace** | Ajout de la dépendance `pg` |
@@ -173,6 +176,88 @@ JWT_SECRET=<une chaîne aléatoire longue et unique — génère-la avec
 **Sur le hub**, un petit lien discret "🔐 Espace d'équipe" en haut à droite
 mène vers `/app` — le mode lien reste la porte d'entrée principale,
 inchangée.
+
+## L'espace de travail connecté — étape 2 : la table `items` partagée
+
+Le vrai cœur du rapprochement avec Jira. Jusqu'ici (mode lien), chaque
+outil a ses propres tables isolées : une carte Kanban n'est pas le même
+objet qu'une tâche Gantt, qui n'est pas une story du Poker. Ici, un seul
+objet — l'**item** — traverse tout : le tableau, les sprints, la vélocité.
+
+**Modèle de données** (2 tables, rattachées à `organizations`) :
+```sql
+sprints (id, org_id → organizations, name, goal, start_date, end_date, created_at)
+items   (id, org_id → organizations, title, description, status,
+         assignee, story_points, sprint_id → sprints, position,
+         created_by → users, created_at, updated_at)
+```
+`status` ∈ `todo` / `in_progress` / `done` — les 3 colonnes du tableau.
+L'appartenance à un sprint (`sprint_id`, nullable) est un concept **séparé**
+du statut : un item sans sprint est "au backlog", quel que soit son statut.
+Les deux premières versions de ce champ se chevauchaient dans ma première
+implémentation (`backlog` était à la fois un statut et l'absence de
+sprint) — corrigé avant de coder le routeur, pour éviter une ambiguïté
+qui aurait compliqué toute la UI ensuite.
+
+**La vélocité n'est plus ressaisie à la main.** `GET /api/orgs/:slug/velocity`
+calcule, par une requête SQL (`SUM(story_points) FILTER (WHERE status = 'done')`,
+groupé par sprint), les points terminés vs. le total — exactement ce que
+l'outil "Suivi de vélocité" du mode lien demande de saisir manuellement à
+chaque sprint. C'est la preuve concrète que l'architecture connectée tient
+sa promesse : avancer les items sur le tableau met à jour la vélocité
+automatiquement, sans ressaisie.
+
+**Sécurité — isolation entre organisations, le point critique de cette
+étape.** Un utilisateur authentifié pourrait légitimement essayer (par
+erreur ou malveillance) d'agir sur une organisation dont il n'est pas
+membre, ou sur un item d'une autre organisation via son URL. Deux niveaux
+de protection, testés explicitement :
+1. **`requireOrgMember`** (middleware) : vérifie que l'utilisateur du
+   jeton JWT est bien membre de l'organisation désignée par `:orgSlug`
+   dans l'URL, avant même de regarder ce qu'il demande. Sinon `403`.
+2. **Défense en profondeur dans les requêtes SQL elles-mêmes** :
+   `itemUpdate`/`itemDelete` incluent systématiquement `AND org_id = $orgId`
+   dans leur `WHERE` — même si `requireOrgMember` a déjà vérifié
+   l'appartenance à l'organisation "courante", ça empêche qu'un identifiant
+   d'item deviné ou volé permette de modifier un item d'une **autre**
+   organisation en appelant l'API avec le slug de sa propre org (le item
+   n'appartient juste pas à cette org → `404`, jamais `200`).
+
+Vérifié par test avec deux organisations distinctes : la tentative de Bob
+de modifier un item d'Alice via l'URL de sa propre organisation renvoie
+`404` (la requête SQL ne trouve simplement rien à mettre à jour), et sa
+tentative d'accéder directement à l'organisation d'Alice renvoie `403`
+avant même d'atteindre la moindre donnée.
+
+**Routes** (toutes sous `/api/orgs/:orgSlug`, protégées par `requireAuth`
+puis `requireOrgMember`) :
+```
+GET    /sprints              liste les sprints de l'organisation
+POST   /sprints               crée un sprint
+GET    /items?sprint=X        liste les items (filtre optionnel :
+                               un id de sprint, ou "backlog" pour
+                               ceux sans sprint)
+POST   /items                 crée un item
+PATCH  /items/:itemId         met à jour un item (titre, statut,
+                               assigné, points, sprint...)
+DELETE /items/:itemId         supprime un item
+GET    /velocity              vélocité calculée par sprint
+```
+
+**Simplification assumée pour cette v1** : pas de temps réel Socket.IO ici
+(contrairement à tous les outils du mode lien) — le tableau connecté
+recharge ses données après chaque action (`loadAll()`), pas de
+synchronisation live entre plusieurs personnes qui regardent le même
+tableau en simultané. Ajouter ça demanderait de faire authentifier les
+connexions Socket.IO (vérifier le JWT à la connexion) et de gérer des
+rooms par organisation — une vraie extension, pas un simple ajustement,
+volontairement reportée pour garder cette étape 2 dans un périmètre
+raisonnable.
+
+**Pas de drag-and-drop non plus** : déplacer un item d'une colonne à
+l'autre se fait via des boutons ← →, exactement comme l'outil Kanban du
+mode lien — cohérence délibérée plutôt qu'ajout d'une librairie de
+glisser-déposer.
 
 ## L'outil Rétrospective
 
@@ -565,22 +650,36 @@ ajoute dans `vite.config.js` (section `server.proxy`) :
 ## Pistes pour la suite
 
 Les 15 outils du hub sont tous fonctionnels (14 avec backend + la Roue de
-décision, 100 % client), et l'étape 1 de l'espace de travail connecté
-(comptes, organisations) est posée. Pistes pour aller plus loin :
+décision, 100 % client), et l'espace de travail connecté a maintenant ses
+deux premières étapes en place : comptes/organisations (étape 1) et la
+table `items` partagée avec Kanban + sprints + vélocité dérivée (étape 2).
+Pistes pour aller plus loin :
 
 **La suite logique du chantier "façon Jira" :**
-- **Étape 2 — table `items` partagée** : le vrai cœur du sujet. Une table
-  `items` (titre, statut, assigné, story_points, sprint_id, org_id) que
-  Kanban, Gantt et Vélocité viendraient lire/écrire au lieu d'avoir chacun
-  leurs propres tables isolées (`kanban_cards`, `gantt_tasks`,
-  `velocity_sprints`). C'est un changement d'architecture, pas un nouvel
-  outil — à faire une fois l'étape 1 éprouvée en usage réel.
 - **Étape 3 — fiche détail d'un item** : commentaires, historique
   d'activité, liens entre items (bloque/dépend de — le modèle de
-  dépendances du Gantt actuel est réutilisable presque tel quel).
+  dépendances du Gantt actuel en mode lien est réutilisable presque tel quel).
 - **Rôles et permissions** : pour l'instant, `memberships.role` ne connaît
   que `owner` ; ajouter `member`/`admin` et des invitations par email
   serait nécessaire avant d'ouvrir l'espace à plusieurs personnes par équipe.
+- **Gantt connecté** : une vue Gantt + chemin critique (réutilisant le
+  moteur `cpm.js` existant) sur les `items` d'un sprint, à partir de leur
+  éventuelle relation de dépendance (nouvelle table `item_dependencies`,
+  sur le modèle de `gantt_dependencies`).
+
+**Sur les items (étape 2) :**
+- **Temps réel** : le tableau connecté recharge ses données après chaque
+  action plutôt que de se synchroniser en direct entre plusieurs personnes
+  (contrairement à tous les outils du mode lien). Ajouter ça demande
+  d'authentifier les connexions Socket.IO (vérifier le JWT à la connexion)
+  et des rooms par organisation.
+- **Drag-and-drop** : actuellement des boutons ← → comme le Kanban du
+  mode lien ; une vraie interaction glisser-déposer serait plus naturelle
+  à cette échelle.
+- **Historique de vélocité dans le temps** : `GET /velocity` donne l'état
+  actuel de tous les sprints, mais pas d'évolution — un graphique comme
+  celui du Suivi de vélocité en mode lien serait un ajout naturel côté
+  frontend, les données sont déjà là.
 
 **Sur l'auth elle-même (étape 1) :**
 - Passer le rate-limiting sur un store partagé (Redis) si le service

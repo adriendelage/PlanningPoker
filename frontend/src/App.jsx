@@ -37,6 +37,7 @@ import Wheel from "./pages/Wheel.jsx";
 import Login from "./pages/Login.jsx";
 import Register from "./pages/Register.jsx";
 import AppHome from "./pages/AppHome.jsx";
+import OrgBoard from "./pages/OrgBoard.jsx";
 import RequireAuth from "./RequireAuth.jsx";
 
 export default function App(){
@@ -115,6 +116,7 @@ export default function App(){
       <Route path="/login" element={<Login/>}/>
       <Route path="/register" element={<Register/>}/>
       <Route path="/app" element={<RequireAuth><AppHome/></RequireAuth>}/>
+      <Route path="/app/:orgSlug/board" element={<RequireAuth><OrgBoard/></RequireAuth>}/>
     </Routes>
   )
 }

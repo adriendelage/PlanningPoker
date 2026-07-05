@@ -5,6 +5,7 @@ const cors = require("cors");
 const path = require("path");
 const db = require("./db");
 const { router: authRouter } = require("./auth");
+const { router: itemsRouter } = require("./items");
 
 const app = express();
 app.use(cors());
@@ -18,6 +19,9 @@ app.get("/api/health", (req, res) => {
 // Espace de travail connecté (comptes, organisations) — complètement
 // indépendant du reste : voir backend/auth.js.
 app.use("/api/auth", authRouter);
+
+// Étape 2 : items & sprints partagés par organisation — voir backend/items.js.
+app.use("/api/orgs/:orgSlug", itemsRouter);
 
 // Remarque : il n'y a volontairement aucun endpoint qui liste ou expose
 // les sessions passées. Ces données (noms, hôtes, contenu des votes/notes)

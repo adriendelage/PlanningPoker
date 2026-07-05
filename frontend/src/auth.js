@@ -43,6 +43,10 @@ async function request(path, { method = "GET", body } = {}) {
   return data;
 }
 
+// Exposé pour que d'autres clients (itemsApi.js) réutilisent la même
+// logique d'authentification sans dupliquer la gestion du jeton.
+export { request as authRequest };
+
 export const authApi = {
   register: (payload) => request("/api/auth/register", { method: "POST", body: payload }),
   login: (payload) => request("/api/auth/login", { method: "POST", body: payload }),
