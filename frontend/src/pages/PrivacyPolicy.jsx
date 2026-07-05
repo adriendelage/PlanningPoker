@@ -22,7 +22,7 @@ export default function PrivacyPolicy() {
         <p>
           Agile Toolbox est un ensemble d'outils gratuits pour les cérémonies
           Agile, édité par Mr1Dridri. Pour toute question relative à cette
-          politique ou à tes données, contacte [CONTACT].
+          politique ou à tes données, contacte mr1dridri@gmail.com.
         </p>
 
         <h2 style={{ color: "#fff", fontSize: 19, marginTop: 32 }}>Données collectées</h2>
@@ -52,7 +52,7 @@ export default function PrivacyPolicy() {
         <p>
           Conformément au RGPD, tu disposes d'un droit d'accès, de
           rectification et de suppression de tes données. Pour l'exercer,
-          contacte [CONTACT]. Tu peux aussi supprimer ton historique local
+          contacte mr1dridri@gmail.com. Tu peux aussi supprimer ton historique local
           à tout moment en vidant les données de ton navigateur pour ce site.
         </p>
 
