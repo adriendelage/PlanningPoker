@@ -1,0 +1,32 @@
+User-agent: *
+Allow: /
+
+# Sessions dynamiques (Poker, Rétro, Daily...) : pas de valeur pour la
+# recherche, et souvent des données propres à une équipe — on préfère
+# ne pas les voir indexées ou mises en cache par les moteurs.
+Disallow: /join/
+Disallow: /retro/join/
+Disallow: /daily/join/
+Disallow: /poker/
+Disallow: /retro/
+Disallow: /daily/
+Disallow: /kanban/
+Disallow: /velocity/
+Disallow: /okr/
+Disallow: /gantt/
+Disallow: /capacity/
+Disallow: /poll/
+Disallow: /goal/
+Disallow: /dod/
+Disallow: /decisions/
+Disallow: /postmortem/
+Disallow: /flags/
+Disallow: /pulse/
+
+# Espace de travail connecté : privé, derrière authentification.
+Disallow: /app
+Disallow: /invite/
+Disallow: /login
+Disallow: /register
+
+Sitemap: https://mr1dridri.netlify.app/sitemap.xml

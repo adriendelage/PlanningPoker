@@ -3,6 +3,8 @@ import Hub from "./pages/Hub.jsx";
 import Home from "./pages/Home.jsx";
 import Invite from "./pages/Invite.jsx";
 import Poker from "./pages/Poker.jsx";
+import CookieBanner from "./pages/CookieBanner.jsx";
+import PrivacyPolicy from "./pages/PrivacyPolicy.jsx";
 import RetroHome from "./pages/RetroHome.jsx";
 import RetroInvite from "./pages/RetroInvite.jsx";
 import Retro from "./pages/Retro.jsx";
@@ -45,9 +47,12 @@ import RequireAuth from "./RequireAuth.jsx";
 
 export default function App(){
   return (
-    <Routes>
+    <>
+      <CookieBanner />
+      <Routes>
       {/* Hub d'accueil — accès à tous les outils */}
       <Route path="/" element={<Hub/>}/>
+      <Route path="/confidentialite" element={<PrivacyPolicy/>}/>
 
       {/* Planning Poker */}
       <Route path="/poker" element={<Home/>}/>
@@ -123,6 +128,7 @@ export default function App(){
       <Route path="/app/:orgSlug/items/:itemId" element={<RequireAuth><ItemDetail/></RequireAuth>}/>
       <Route path="/app/:orgSlug/members" element={<RequireAuth><OrgMembers/></RequireAuth>}/>
       <Route path="/invite/:token" element={<RequireAuth><AcceptInvite/></RequireAuth>}/>
-    </Routes>
+      </Routes>
+    </>
   )
 }
