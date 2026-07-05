@@ -6,6 +6,8 @@ const path = require("path");
 const db = require("./db");
 const { router: authRouter } = require("./auth");
 const { router: itemsRouter } = require("./items");
+const { router: membersRouter } = require("./members");
+const { router: invitationsRouter } = require("./invitations");
 
 const app = express();
 app.use(cors());
@@ -22,6 +24,12 @@ app.use("/api/auth", authRouter);
 
 // Étape 2 : items & sprints partagés par organisation — voir backend/items.js.
 app.use("/api/orgs/:orgSlug", itemsRouter);
+
+// Étape 4 : membres et invitations, scindés par organisation — backend/members.js.
+app.use("/api/orgs/:orgSlug", membersRouter);
+
+// Étape 4 : acceptation d'invitation, scindée par token — backend/invitations.js.
+app.use("/api/invitations", invitationsRouter);
 
 // Remarque : il n'y a volontairement aucun endpoint qui liste ou expose
 // les sessions passées. Ces données (noms, hôtes, contenu des votes/notes)
