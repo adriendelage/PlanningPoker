@@ -1,6 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getLocalSessions, removeLocalSession } from "../localHistory";
+import {
+  getLocalSessions, removeLocalSession,
+  downloadLocalSessionsBackup, importLocalSessionsFromJson,
+} from "../localHistory";
 
 const TOOLS = [
   {
@@ -211,6 +214,8 @@ function fmtDate(ts) {
 export default function Hub() {
   const nav = useNavigate();
   const [mine, setMine] = useState([]);
+  const [importMsg, setImportMsg] = useState(null); // {type:"ok"|"error", text}
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     setMine(getLocalSessions());
@@ -220,6 +225,31 @@ export default function Hub() {
     e.stopPropagation();
     removeLocalSession(entry.id, entry.tool);
     setMine(list => list.filter(s => !(s.id === entry.id && s.tool === entry.tool)));
+  };
+
+  const triggerImport = () => fileInputRef.current?.click();
+
+  const handleImportFile = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // permet de réimporter le même fichier deux fois de suite si besoin
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const { importedCount, total } = importLocalSessionsFromJson(reader.result);
+        setMine(getLocalSessions());
+        setImportMsg({
+          type: "ok",
+          text: importedCount > 0
+            ? `${importedCount} session${importedCount > 1 ? "s" : ""} importée${importedCount > 1 ? "s" : ""} (${total} au total).`
+            : `Rien de nouveau à importer (${total} session${total > 1 ? "s" : ""} déjà présente${total > 1 ? "s" : ""}).`,
+        });
+      } catch (err) {
+        setImportMsg({ type: "error", text: err.message });
+      }
+      setTimeout(() => setImportMsg(null), 5000);
+    };
+    reader.readAsText(file);
   };
 
   return (
@@ -322,6 +352,43 @@ export default function Hub() {
             </div>
           ))}
         </div>
+
+        {/* ── Sauvegarde de l'historique local (export / import) ── */}
+        <section style={{ marginBottom: 28 }}>
+          <div style={{
+            background: "#111", border: "1px solid #222", borderRadius: 14,
+            padding: "14px 18px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12,
+          }}>
+            <div style={{ flex: "1 1 220px" }}>
+              <div style={{ fontSize: 13.5, color: "#aaa", fontWeight: 600, marginBottom: 2 }}>
+                💾 Sauvegarde de « Mes sessions »
+              </div>
+              <div style={{ fontSize: 12, color: "#555" }}>
+                Change d'ordinateur ? Exporte ta liste ici, puis importe-la sur le nouvel appareil.
+              </div>
+            </div>
+            <button onClick={downloadLocalSessionsBackup} disabled={mine.length === 0}
+              style={{
+                fontSize: 13, fontWeight: 600, borderRadius: 8, padding: "8px 14px", cursor: mine.length === 0 ? "default" : "pointer",
+                background: "#1a1a2e", border: "1px solid #333", color: mine.length === 0 ? "#444" : "#ccc",
+              }}>
+              ⬇️ Exporter
+            </button>
+            <button onClick={triggerImport}
+              style={{ fontSize: 13, fontWeight: 600, borderRadius: 8, padding: "8px 14px", cursor: "pointer", background: "#1a1a2e", border: "1px solid #333", color: "#ccc" }}>
+              ⬆️ Importer
+            </button>
+            <input ref={fileInputRef} type="file" accept="application/json,.json" onChange={handleImportFile} style={{ display: "none" }} />
+          </div>
+          {importMsg && (
+            <p style={{
+              margin: "8px 0 0", fontSize: 12.5,
+              color: importMsg.type === "ok" ? "#00f5d4" : "#ff8888",
+            }}>
+              {importMsg.type === "ok" ? "✓ " : "⚠️ "}{importMsg.text}
+            </p>
+          )}
+        </section>
 
         {/* ── Mes sessions (privé — stocké uniquement dans ce navigateur) ── */}
         {mine.length > 0 && (
