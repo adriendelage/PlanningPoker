@@ -1105,6 +1105,102 @@ async function velocityBySprintForOrg(orgId) {
   return rows;
 }
 
+// ── Étape 5 : burndown chart, reconstruit depuis l'historique d'activité ────
+// Contrairement à un burndown "classique" qui a besoin d'un snapshot pris
+// chaque jour (un job planifié), celui-ci est calculé à la volée à partir
+// de `item_activity` (déjà journalisé depuis l'étape 3, un changement de
+// statut = un événement horodaté) : on rejoue simplement l'historique pour
+// savoir, pour chaque jour, combien de points étaient encore "non terminés"
+// à la fin de cette journée-là. Pas de tâche planifiée à faire tourner.
+async function sprintBurndown(orgId, sprintId) {
+  if (!enabled()) return null;
+
+  const sprintRes = await pool.query(
+    `SELECT * FROM sprints WHERE id = $1 AND org_id = $2`,
+    [sprintId, orgId]
+  );
+  if (sprintRes.rows.length === 0) return null;
+  const sprint = sprintRes.rows[0];
+
+  const itemsRes = await pool.query(
+    `SELECT id, story_points FROM items WHERE sprint_id = $1 AND org_id = $2`,
+    [sprintId, orgId]
+  );
+  const items = itemsRes.rows;
+  const totalPoints = items.reduce((sum, i) => sum + (i.story_points || 0), 0);
+
+  let activity = [];
+  if (items.length > 0) {
+    const itemIds = items.map(i => i.id);
+    const actRes = await pool.query(
+      `SELECT item_id, details, created_at FROM item_activity
+       WHERE item_id = ANY($1::int[]) AND action = 'status_changed'
+       ORDER BY created_at ASC`,
+      [itemIds]
+    );
+    activity = actRes.rows;
+  }
+
+  // Fenêtre de suivi : du début de sprint (ou de sa création si pas de date
+  // renseignée) jusqu'à sa fin (ou aujourd'hui si le sprint est en cours ou
+  // sans date de fin). Deux calculs distincts, à dessein :
+  // - totalDays (nombre d'INTERVALLES pour la ligne idéale) se calcule
+  //   minuit à minuit, sinon un sprint de "6 jours" compterait 7 intervalles ;
+  // - trackUntil (borne de la BOUCLE ci-dessous) doit inclure toute la
+  //   dernière journée (23:59:59), sinon un sprint finissant "aujourd'hui"
+  //   perdrait sa propre journée dans la comparaison (minuit UTC de la
+  //   date stockée vs l'heure actuelle du même jour, qui semble "plus tard").
+  const startDate = sprint.start_date ? new Date(sprint.start_date) : new Date(sprint.created_at);
+  const now = new Date();
+  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const plannedEndMidnight = sprint.end_date ? new Date(sprint.end_date) : todayMidnight;
+  const totalDays = Math.max(1, Math.round((plannedEndMidnight - startDate) / 86400000));
+
+  const endOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+  const trackUntil = endOfDay(plannedEndMidnight) < endOfDay(todayMidnight)
+    ? endOfDay(plannedEndMidnight)
+    : endOfDay(todayMidnight);
+
+  const days = [];
+  const cursor = new Date(startDate);
+  cursor.setHours(23, 59, 59, 999);
+  let dayIndex = 0;
+
+  while (cursor <= trackUntil || dayIndex === 0) {
+    let remaining = 0;
+    for (const item of items) {
+      // Dernier changement de statut connu POUR CET ITEM à la fin de ce jour.
+      // Sans événement antérieur ou égal à cette date, l'item est considéré
+      // dans son statut par défaut à la création ("todo").
+      let lastStatus = "todo";
+      for (const ev of activity) {
+        if (ev.item_id === item.id && new Date(ev.created_at) <= cursor) {
+          lastStatus = ev.details.to;
+        }
+      }
+      if (lastStatus !== "done") remaining += item.story_points || 0;
+    }
+    const idealRemaining = Math.max(0, totalPoints - (totalPoints * (dayIndex / totalDays)));
+    days.push({
+      date: cursor.toISOString().slice(0, 10),
+      remaining,
+      ideal: Math.round(idealRemaining * 10) / 10,
+    });
+    if (cursor >= trackUntil) break;
+    cursor.setDate(cursor.getDate() + 1);
+    cursor.setHours(23, 59, 59, 999);
+    dayIndex++;
+  }
+
+  return {
+    sprintName: sprint.name,
+    startDate: sprint.start_date,
+    endDate: sprint.end_date,
+    totalPoints,
+    days,
+  };
+}
+
 // ── Étape 3 : fiche détail d'un item ──────────────────────────────────────────
 
 async function itemGetById(itemId, orgId) {
@@ -1446,7 +1542,7 @@ module.exports = {
   authFindUserByEmail, authRegister, authGetUserOrgs,
   orgFindBySlug, orgCheckMembership,
   sprintsList, sprintCreate,
-  itemsList, itemCreate, itemUpdate, itemDelete, velocityBySprintForOrg,
+  itemsList, itemCreate, itemUpdate, itemDelete, velocityBySprintForOrg, sprintBurndown,
   itemGetById, itemCommentsList, itemCommentAdd,
   itemActivityList, itemActivityLog,
   itemDependenciesList, itemDependencyAdd, itemDependencyRemove,

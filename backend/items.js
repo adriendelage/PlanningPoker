@@ -78,6 +78,19 @@ router.get("/velocity", async (req, res) => {
   }
 });
 
+// ── Étape 5 : burndown chart ──────────────────────────────────────────────────
+
+router.get("/sprints/:sprintId/burndown", async (req, res) => {
+  try {
+    const data = await db.sprintBurndown(req.org.id, req.params.sprintId);
+    if (!data) return res.status(404).json({ error: "Sprint introuvable dans cette organisation." });
+    res.json(data);
+  } catch (e) {
+    console.error("Erreur GET /sprints/:sprintId/burndown:", e.message);
+    res.status(500).json({ error: "Erreur serveur." });
+  }
+});
+
 // ── Items ────────────────────────────────────────────────────────────────────
 
 router.get("/items", async (req, res) => {

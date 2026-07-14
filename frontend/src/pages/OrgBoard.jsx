@@ -43,6 +43,7 @@ export default function OrgBoard() {
   const [error, setError] = useState("");
   const [form, setForm] = useState({ title: "", assignee: "", storyPoints: "" });
   const [newSprintName, setNewSprintName] = useState("");
+  const [newSprintWeeks, setNewSprintWeeks] = useState(2);
   const [showSprintForm, setShowSprintForm] = useState(false);
 
   const loadAll = async () => {
@@ -98,7 +99,18 @@ export default function OrgBoard() {
   const createSprint = async () => {
     if (!newSprintName.trim()) return;
     try {
-      const sprint = await itemsApi.createSprint(orgSlug, { name: newSprintName });
+      // Dates calculées automatiquement (démarre aujourd'hui) plutôt que
+      // deux sélecteurs de date manuels — plus rapide à l'usage, et
+      // nécessaire pour que le burndown chart ait une ligne idéale
+      // pertinente (voir /app/:orgSlug/sprints/:id/burndown).
+      const start = new Date();
+      const end = new Date();
+      end.setDate(end.getDate() + newSprintWeeks * 7 - 1);
+      const sprint = await itemsApi.createSprint(orgSlug, {
+        name: newSprintName,
+        startDate: start.toISOString().slice(0, 10),
+        endDate: end.toISOString().slice(0, 10),
+      });
       setNewSprintName("");
       setShowSprintForm(false);
       setSprints(s => [sprint, ...s]);
@@ -163,6 +175,12 @@ export default function OrgBoard() {
             <option value="backlog">Backlog (sans sprint)</option>
             {sprints.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
+          {sprintFilter !== "all" && sprintFilter !== "backlog" && (
+            <a href={`/app/${orgSlug}/sprints/${sprintFilter}/burndown`}
+              style={{ fontSize: 13, color: ACCENT, border: `1px solid ${ACCENT}44`, borderRadius: 999, padding: "8px 14px", textDecoration: "none", fontWeight: 600 }}>
+              📉 Burndown
+            </a>
+          )}
           <button onClick={() => setShowSprintForm(s => !s)}
             style={{ padding: "10px 14px", background: "#1a1a2e", border: "1px solid #444", borderRadius: 8, color: "#aaa", cursor: "pointer", fontSize: 13.5 }}>
             + Nouveau sprint
@@ -173,6 +191,12 @@ export default function OrgBoard() {
                 onChange={e => setNewSprintName(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && createSprint()}
                 style={inputStyle} />
+              <select value={newSprintWeeks} onChange={e => setNewSprintWeeks(Number(e.target.value))} style={inputStyle}>
+                <option value={1}>1 semaine</option>
+                <option value={2}>2 semaines</option>
+                <option value={3}>3 semaines</option>
+                <option value={4}>4 semaines</option>
+              </select>
               <button onClick={createSprint}
                 style={{ padding: "10px 14px", background: ACCENT, border: "none", borderRadius: 8, color: "#0d0d1a", fontWeight: 700, cursor: "pointer", fontSize: 13.5 }}>
                 Créer

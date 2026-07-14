@@ -40,6 +40,7 @@ import Login from "./pages/Login.jsx";
 import Register from "./pages/Register.jsx";
 import AppHome from "./pages/AppHome.jsx";
 import OrgBoard from "./pages/OrgBoard.jsx";
+import SprintBurndown from "./pages/SprintBurndown.jsx";
 import ItemDetail from "./pages/ItemDetail.jsx";
 import OrgMembers from "./pages/OrgMembers.jsx";
 import AcceptInvite from "./pages/AcceptInvite.jsx";
@@ -125,6 +126,7 @@ export default function App(){
       <Route path="/register" element={<Register/>}/>
       <Route path="/app" element={<RequireAuth><AppHome/></RequireAuth>}/>
       <Route path="/app/:orgSlug/board" element={<RequireAuth><OrgBoard/></RequireAuth>}/>
+      <Route path="/app/:orgSlug/sprints/:sprintId/burndown" element={<RequireAuth><SprintBurndown/></RequireAuth>}/>
       <Route path="/app/:orgSlug/items/:itemId" element={<RequireAuth><ItemDetail/></RequireAuth>}/>
       <Route path="/app/:orgSlug/members" element={<RequireAuth><OrgMembers/></RequireAuth>}/>
       <Route path="/invite/:token" element={<RequireAuth><AcceptInvite/></RequireAuth>}/>

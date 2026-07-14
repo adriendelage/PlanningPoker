@@ -15,6 +15,7 @@ export const itemsApi = {
   deleteItem: (orgSlug, itemId) => authRequest(`/api/orgs/${orgSlug}/items/${itemId}`, { method: "DELETE" }),
 
   velocity: (orgSlug) => authRequest(`/api/orgs/${orgSlug}/velocity`),
+  burndown: (orgSlug, sprintId) => authRequest(`/api/orgs/${orgSlug}/sprints/${sprintId}/burndown`),
 
   // Étape 3 : fiche détail (commentaires, activité, dépendances)
   getItemDetail: (orgSlug, itemId) => authRequest(`/api/orgs/${orgSlug}/items/${itemId}/detail`),
