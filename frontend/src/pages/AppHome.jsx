@@ -63,12 +63,11 @@ export default function AppHome() {
           ))}
         </div>
 
-        <div style={{ background: "#111", border: "1px dashed #333", borderRadius: 14, padding: "24px 22px", textAlign: "center", color: "#666" }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
-          <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6 }}>
-            Étape 2 en place : le tableau connecté ci-dessus (Kanban, sprints,
-            vélocité) lit et écrit une table "items" partagée par organisation —
-            fini les silos indépendants du mode lien.
+        <div style={{ background: "#111", border: "1px dashed #333", borderRadius: 14, padding: "20px 22px", textAlign: "center", color: "#666" }}>
+          <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.6 }}>
+            👆 Clique sur <strong style={{ color: "#00f5d4" }}>« Ouvrir le tableau »</strong> pour accéder au
+            Kanban, aux sprints et à la vélocité de ton organisation — c'est là
+            que tout se passe, cette page ne fait que lister tes organisations.
           </p>
         </div>
 
