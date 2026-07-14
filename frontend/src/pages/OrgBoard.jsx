@@ -14,8 +14,13 @@ function ItemCard({ item, onMove, onDelete, colIndex, orgSlug }) {
   return (
     <div style={{ background: "#1a1a2e", border: "1px solid #2a2a44", borderRadius: 10, padding: "11px 12px", marginBottom: 8 }}>
       <a href={`/app/${orgSlug}/items/${item.id}`}
-        style={{ display: "block", fontSize: 14.5, color: "#ddd", marginBottom: 6, textDecoration: "none" }}>
-        {item.title}
+        style={{
+          display: "flex", alignItems: "baseline", gap: 6, fontSize: 14.5,
+          color: ACCENT, marginBottom: 6, textDecoration: "none",
+          borderBottom: "1px dotted #00f5d466", paddingBottom: 2,
+        }}>
+        <span style={{ flex: 1 }}>{item.title}</span>
+        <span style={{ fontSize: 11.5, color: "#00f5d499", whiteSpace: "nowrap" }}>Détails ›</span>
       </a>
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#777" }}>
         {item.assignee && <span>👤 {item.assignee}</span>}
@@ -166,6 +171,7 @@ export default function OrgBoard() {
         </header>
         <p style={{ margin: "0 0 20px", fontSize: 12.5, color: "#555" }}>
           Tableau connecté — Kanban, sprints et vélocité partagent la même donnée (table "items").
+          Clique sur le titre d'une carte pour sa fiche détaillée (description, commentaires, historique, dépendances).
         </p>
 
         {/* Sélecteur de sprint + stats */}
