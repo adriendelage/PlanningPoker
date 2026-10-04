@@ -201,6 +201,16 @@ async function init() {
       UNIQUE (session_id, name, day)
     );
 
+    -- Tableau blanc : un élément (post-it, texte, forme, trait...) par ligne,
+    -- les propriétés variables sont dans le JSONB data
+    CREATE TABLE IF NOT EXISTS whiteboard_elements (
+      session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      el_id       TEXT NOT NULL,
+      data        JSONB NOT NULL,
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (session_id, el_id)
+    );
+
     -- ═══ Espace de travail connecté (mode compte, indépendant du mode lien) ═══
     -- Complètement isolé des tables ci-dessus : aucun outil existant ne les
     -- référence. C'est la fondation de l'étape 2 (table "items" partagée).
@@ -916,6 +926,41 @@ async function pulseLoadBoard(id) {
   return { name: s.rows[0].name, entries: r.rows };
 }
 
+// ── Tableau blanc ────────────────────────────────────────────────────────────
+
+async function whiteboardUpsert(sessionId, elId, data) {
+  if (!enabled()) return;
+  await pool.query(
+    `INSERT INTO whiteboard_elements (session_id, el_id, data, updated_at)
+     VALUES ($1, $2, $3::jsonb, now())
+     ON CONFLICT (session_id, el_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+    [sessionId, elId, JSON.stringify(data)]
+  );
+}
+
+async function whiteboardDelete(sessionId, elId) {
+  if (!enabled()) return;
+  await pool.query(`DELETE FROM whiteboard_elements WHERE session_id = $1 AND el_id = $2`, [sessionId, elId]);
+}
+
+async function whiteboardClear(sessionId) {
+  if (!enabled()) return;
+  await pool.query(`DELETE FROM whiteboard_elements WHERE session_id = $1`, [sessionId]);
+}
+
+async function whiteboardLoadBoard(id) {
+  if (!enabled()) return null;
+  const s = await pool.query(`SELECT * FROM sessions WHERE id = $1 AND tool = 'whiteboard'`, [id]);
+  if (s.rows.length === 0) return null;
+  const r = await pool.query(
+    `SELECT el_id, data FROM whiteboard_elements WHERE session_id = $1`,
+    [id]
+  );
+  const elements = {};
+  for (const row of r.rows) elements[row.el_id] = row.data;
+  return { name: s.rows[0].name, elements };
+}
+
 // ═══ Espace de travail connecté : authentification ══════════════════════════
 
 async function authFindUserByEmail(email) {
@@ -1539,6 +1584,7 @@ module.exports = {
   postmortemSave, postmortemLoad,
   flagAdd, flagToggle, flagUpdate, flagDelete, flagLoadBoard,
   pulseCheckin, pulseLoadBoard,
+  whiteboardUpsert, whiteboardDelete, whiteboardClear, whiteboardLoadBoard,
   authFindUserByEmail, authRegister, authGetUserOrgs,
   orgFindBySlug, orgCheckMembership,
   sprintsList, sprintCreate,

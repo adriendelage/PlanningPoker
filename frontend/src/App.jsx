@@ -33,6 +33,8 @@ import PostmortemHome from "./pages/PostmortemHome.jsx";
 import Postmortem from "./pages/Postmortem.jsx";
 import FlagsHome from "./pages/FlagsHome.jsx";
 import Flags from "./pages/Flags.jsx";
+import WhiteboardHome from "./pages/WhiteboardHome.jsx";
+import Whiteboard from "./pages/Whiteboard.jsx";
 import PulseHome from "./pages/PulseHome.jsx";
 import Pulse from "./pages/Pulse.jsx";
 import Wheel from "./pages/Wheel.jsx";
@@ -117,6 +119,10 @@ export default function App(){
       {/* Pouls d'équipe */}
       <Route path="/pulse" element={<PulseHome/>}/>
       <Route path="/pulse/:id" element={<Pulse/>}/>
+
+      {/* Tableau blanc */}
+      <Route path="/whiteboard" element={<WhiteboardHome/>}/>
+      <Route path="/whiteboard/:id" element={<Whiteboard/>}/>
 
       {/* Roue de décision — 100% client, pas de session */}
       <Route path="/wheel" element={<Wheel/>}/>

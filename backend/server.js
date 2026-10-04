@@ -463,6 +463,66 @@ function broadcastPulse(id) {
 }
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══ Tableau blanc ═══════════════════════════════════════════════════════════
+// Les éléments sont stockés dans un objet { elId: element }. Chaque modification
+// est validée (types, bornes, tailles) puis diffusée aux autres clients ; la
+// sauvegarde en base est différée (debounce) pour absorber les déplacements.
+let whiteboards = {};
+const wbTimers = {};
+const WB_MAX_ELEMENTS = 1500;
+const WB_TYPES = ["sticky", "text", "rect", "ellipse", "arrow", "pencil"];
+const WB_ID_RE = /^[a-z0-9]{4,16}$/;
+const WB_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+const wbNum = (v, min, max, def) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return def;
+  return Math.max(min, Math.min(max, n));
+};
+
+function sanitizeWbElement(raw) {
+  if (!raw || typeof raw !== "object" || !WB_TYPES.includes(raw.type)) return null;
+  const el = {
+    type: raw.type,
+    x: wbNum(raw.x, -100000, 100000, 0),
+    y: wbNum(raw.y, -100000, 100000, 0),
+    z: wbNum(raw.z, 0, 1e15, 0),
+    color: WB_COLOR_RE.test(raw.color) ? raw.color : "#fee440",
+  };
+  if (["sticky", "text", "rect", "ellipse"].includes(el.type)) {
+    el.w = wbNum(raw.w, 20, 6000, 160);
+    el.h = wbNum(raw.h, 20, 6000, 120);
+    el.text = String(raw.text || "").slice(0, 2000);
+    el.fs = wbNum(raw.fs, 8, 120, 16);
+  }
+  if (el.type === "arrow" || el.type === "pencil") {
+    const pts = Array.isArray(raw.points) ? raw.points.slice(0, 4000) : [];
+    el.points = pts.map(n => wbNum(n, -100000, 100000, 0));
+    if (el.points.length % 2 === 1) el.points.pop();
+    if (el.points.length < 4) return null;
+    el.size = wbNum(raw.size, 1, 24, 3);
+  }
+  return el;
+}
+
+async function ensureWhiteboard(id) {
+  if (whiteboards[id]) return whiteboards[id];
+  const board = await db.whiteboardLoadBoard(id);
+  if (board) whiteboards[id] = board;
+  return whiteboards[id] || null;
+}
+
+function scheduleWbSave(boardId, elId) {
+  const key = boardId + ":" + elId;
+  clearTimeout(wbTimers[key]);
+  wbTimers[key] = setTimeout(() => {
+    delete wbTimers[key];
+    const el = whiteboards[boardId] && whiteboards[boardId].elements[elId];
+    if (!el) return;
+    db.whiteboardUpsert(boardId, elId, el).catch(e => console.error("DB whiteboardUpsert:", e.message));
+  }, 400);
+}
+// ═══════════════════════════════════════════════════════════════════════════════
+
 io.on("connection", socket => {
 
   socket.on("session:create", (data, cb) => {
@@ -1456,6 +1516,75 @@ io.on("connection", socket => {
     if (idx === -1) p.entries.push({ name: n, mood: m, day: today });
     else p.entries[idx].mood = m;
     broadcastPulse(id);
+  });
+
+  // ─── Événements Tableau blanc ───────────────────────────────────────────────
+
+  socket.on("whiteboard:create", (data, cb) => {
+    const id = Math.random().toString(36).substring(2, 8);
+    whiteboards[id] = { name: data.name || null, elements: {} };
+    socket.join("whiteboard:" + id);
+    cb(id);
+    db.createSession({ id, name: data.name, hostName: data.hostName, tool: "whiteboard", taskCount: 0 })
+      .catch(e => console.error("DB createSession:", e.message));
+  });
+
+  socket.on("whiteboard:open", async ({ id }) => {
+    const b = await ensureWhiteboard(id).catch(() => null);
+    if (!b) return socket.emit("whiteboard:notfound");
+    socket.join("whiteboard:" + id);
+    socket.emit("whiteboard:state", { name: b.name, elements: b.elements });
+  });
+
+  // Création ou modification d'un élément (l'élément complet est renvoyé)
+  socket.on("whiteboard:upsert", ({ id, elId, el }) => {
+    const b = whiteboards[id];
+    if (!b || typeof elId !== "string" || !WB_ID_RE.test(elId)) return;
+    const clean = sanitizeWbElement(el);
+    if (!clean) return;
+    if (!b.elements[elId] && Object.keys(b.elements).length >= WB_MAX_ELEMENTS) return;
+    b.elements[elId] = clean;
+    socket.to("whiteboard:" + id).emit("whiteboard:upsert", { elId, el: clean });
+    scheduleWbSave(id, elId);
+  });
+
+  socket.on("whiteboard:delete", ({ id, elId }) => {
+    const b = whiteboards[id];
+    if (!b || !b.elements[elId]) return;
+    delete b.elements[elId];
+    clearTimeout(wbTimers[id + ":" + elId]);
+    delete wbTimers[id + ":" + elId];
+    socket.to("whiteboard:" + id).emit("whiteboard:delete", { elId });
+    db.whiteboardDelete(id, elId).catch(e => console.error("DB whiteboardDelete:", e.message));
+  });
+
+  socket.on("whiteboard:clear", ({ id }) => {
+    const b = whiteboards[id];
+    if (!b) return;
+    for (const elId of Object.keys(b.elements)) {
+      clearTimeout(wbTimers[id + ":" + elId]);
+      delete wbTimers[id + ":" + elId];
+    }
+    b.elements = {};
+    socket.to("whiteboard:" + id).emit("whiteboard:state", { name: b.name, elements: {} });
+    db.whiteboardClear(id).catch(e => console.error("DB whiteboardClear:", e.message));
+  });
+
+  // Curseurs des autres participants (éphémères, jamais sauvegardés)
+  socket.on("whiteboard:cursor", ({ id, x, y, name }) => {
+    if (!whiteboards[id] || !socket.rooms.has("whiteboard:" + id)) return;
+    socket.volatile.to("whiteboard:" + id).emit("whiteboard:cursor", {
+      sid: socket.id,
+      x: wbNum(x, -100000, 100000, 0),
+      y: wbNum(y, -100000, 100000, 0),
+      name: String(name || "").slice(0, 30),
+    });
+  });
+
+  socket.on("disconnecting", () => {
+    for (const room of socket.rooms) {
+      if (room.startsWith("whiteboard:")) socket.to(room).emit("whiteboard:cursorgone", { sid: socket.id });
+    }
   });
 
   socket.on("disconnect", () => {

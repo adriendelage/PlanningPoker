@@ -157,6 +157,16 @@ const TOOLS = [
     active: true,
   },
   {
+    id: "whiteboard",
+    icon: "🧑‍🎨",
+    suit: "✎",
+    name: "Tableau blanc",
+    desc: "Post-its, texte, formes, flèches et crayon libre sur un canevas infini, à plusieurs et en direct.",
+    accent: "#4cc9f0",
+    path: "/whiteboard",
+    active: true,
+  },
+  {
     id: "wheel",
     icon: "🎡",
     suit: "○",
@@ -205,6 +215,7 @@ const TOOL_META = {
   postmortem: { icon: "🩹", accent: "#c1121f" },
   flags:      { icon: "🚩", accent: "#6a4c93" },
   pulse:      { icon: "💓", accent: "#ff6b9d" },
+  whiteboard: { icon: "🧑‍🎨", accent: "#4cc9f0" },
 };
 
 function fmtDate(ts) {

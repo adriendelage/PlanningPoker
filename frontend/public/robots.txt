@@ -22,6 +22,7 @@ Disallow: /decisions/
 Disallow: /postmortem/
 Disallow: /flags/
 Disallow: /pulse/
+Disallow: /whiteboard/
 
 # Espace de travail connecté : privé, derrière authentification.
 Disallow: /app
