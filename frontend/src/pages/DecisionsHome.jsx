@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
 import { addLocalSession } from "../localHistory";
+import { useDocumentMeta } from "../useDocumentMeta";
 
 export default function DecisionsHome() {
+  useDocumentMeta("Journal de décisions", "Gardez une trace des décisions d'équipe : quoi, pourquoi, par qui — un ADR léger et partagé.");
   const [name, setName] = useState("");
   const [hostName, setHostName] = useState("");
   const nav = useNavigate();

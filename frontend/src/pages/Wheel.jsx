@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { useDocumentMeta } from "../useDocumentMeta";
 
 const COLORS = ["#00f5d4", "#f15bb5", "#fee440", "#9b5de5", "#00bbf9", "#ff9f1c", "#e63946", "#06d6a0", "#118ab2", "#ef476f", "#8ac926", "#ffca3a"];
 
@@ -14,6 +15,7 @@ function describeSlice(cx, cy, r, startAngle, endAngle) {
 }
 
 export default function Wheel() {
+  useDocumentMeta("Roue de décision", "Une roue de décision aléatoire pour trancher rapidement : qui anime le daily, qui fait la démo...");
   const [names, setNames] = useState(["Alice", "Bob", "Claire"]);
   const [draft, setDraft] = useState("");
   const [rotation, setRotation] = useState(0);

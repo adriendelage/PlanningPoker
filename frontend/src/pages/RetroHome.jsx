@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
 import { addLocalSession } from "../localHistory";
+import { useDocumentMeta } from "../useDocumentMeta";
 
 const TEMPLATES = [
   { id: "ssc",  name: "Start · Stop · Continue", columns: ["Start", "Stop", "Continue"] },
@@ -11,6 +12,7 @@ const TEMPLATES = [
 ];
 
 export default function RetroHome() {
+  useDocumentMeta("Rétrospective d'équipe", "Organisez une rétrospective Agile en ligne : colonnes personnalisables, post-its anonymes, vote à points. Gratuit, sans compte.");
   const [sessionName, setSessionName] = useState("");
   const [hostName, setHostName] = useState("");
   const [template, setTemplate] = useState("ssc");

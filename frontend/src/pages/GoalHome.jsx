@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
 import { addLocalSession } from "../localHistory";
+import { useDocumentMeta } from "../useDocumentMeta";
 
 export default function GoalHome() {
+  useDocumentMeta("Objectif de sprint", "Formulez l'objectif de votre sprint et mesurez la confiance de l'équipe à l'atteindre.");
   const [name, setName] = useState("");
   const [hostName, setHostName] = useState("");
   const nav = useNavigate();

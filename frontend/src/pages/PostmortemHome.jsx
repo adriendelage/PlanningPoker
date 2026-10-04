@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
 import { addLocalSession } from "../localHistory";
+import { useDocumentMeta } from "../useDocumentMeta";
 
 export default function PostmortemHome() {
+  useDocumentMeta("Post-mortem d'incident", "Documentez un incident : chronologie, cause racine, actions correctives — un post-mortem structuré.");
   const [name, setName] = useState("");
   const [hostName, setHostName] = useState("");
   const nav = useNavigate();

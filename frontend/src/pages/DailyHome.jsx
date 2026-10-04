@@ -2,10 +2,12 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
 import { addLocalSession } from "../localHistory";
+import { useDocumentMeta } from "../useDocumentMeta";
 
 const DURATIONS = [60, 90, 120, 180, 300];
 
 export default function DailyHome() {
+  useDocumentMeta("Daily Timer", "Un chronomètre de stand-up équitable : rotation des participants, temps de parole partagé. Gratuit, sans compte.");
   const [sessionName, setSessionName] = useState("");
   const [hostName, setHostName] = useState("");
   const [seconds, setSeconds] = useState(120);

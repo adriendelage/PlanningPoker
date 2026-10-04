@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
 import { addLocalSession } from "../localHistory";
+import { useDocumentMeta } from "../useDocumentMeta";
 
 export default function FlagsHome() {
+  useDocumentMeta("Suivi de feature flags", "Suivez vos feature flags actifs par environnement, avec propriétaire et notes.");
   const [name, setName] = useState("");
   const [hostName, setHostName] = useState("");
   const nav = useNavigate();

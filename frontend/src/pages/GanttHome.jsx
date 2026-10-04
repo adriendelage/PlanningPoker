@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
 import { addLocalSession } from "../localHistory";
+import { useDocumentMeta } from "../useDocumentMeta";
 
 export default function GanttHome() {
+  useDocumentMeta("Rétro-planning (Gantt)", "Planifiez vos tâches avec dépendances et calcul automatique du chemin critique, en mode diagramme de Gantt.");
   const [name, setName] = useState("");
   const [hostName, setHostName] = useState("");
   const nav = useNavigate();

@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
 import { addLocalSession } from "../localHistory";
+import { useDocumentMeta } from "../useDocumentMeta";
 
 export default function KanbanHome() {
+  useDocumentMeta("Kanban léger", "Un tableau Kanban simple et permanent pour suivre votre sprint : À faire, En cours, Terminé. Sans la lourdeur de Jira.");
   const [name, setName] = useState("");
   const [hostName, setHostName] = useState("");
   const nav = useNavigate();

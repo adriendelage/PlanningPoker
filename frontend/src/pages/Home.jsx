@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
 import { addLocalSession } from "../localHistory";
+import { useDocumentMeta } from "../useDocumentMeta";
 
 export default function Home(){
+  useDocumentMeta("Planning Poker", "Estimez vos user stories en équipe, en temps réel, gratuitement et sans compte — un lien suffit.");
   const [sessionName,setSessionName]=useState("");
   const [hostName,setHostName]=useState("");
   const [tasks,setTasks]=useState([""]);

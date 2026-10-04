@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
 import { addLocalSession } from "../localHistory";
+import { useDocumentMeta } from "../useDocumentMeta";
 
 export default function PulseHome() {
+  useDocumentMeta("Pouls d'équipe", "Un check-in d'humeur quotidien en un clic, avec la tendance de l'équipe dans le temps.");
   const [name, setName] = useState("");
   const [hostName, setHostName] = useState("");
   const nav = useNavigate();

@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
 import { addLocalSession } from "../localHistory";
+import { useDocumentMeta } from "../useDocumentMeta";
 
 export default function PollHome() {
+  useDocumentMeta("Sondage rapide", "Lancez un sondage d'équipe en quelques secondes : question, options, vote en direct.");
   const [hostName, setHostName] = useState("");
   const [question, setQuestion] = useState("");
   const [options, setOptions] = useState(["", ""]);

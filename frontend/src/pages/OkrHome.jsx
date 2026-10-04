@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
 import { addLocalSession } from "../localHistory";
+import { useDocumentMeta } from "../useDocumentMeta";
 
 export default function OkrHome() {
+  useDocumentMeta("OKR léger", "Définissez et suivez vos objectifs et résultats clés (OKR) en équipe, avec une progression partagée en direct.");
   const [name, setName] = useState("");
   const [hostName, setHostName] = useState("");
   const nav = useNavigate();

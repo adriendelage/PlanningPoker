@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
 import { addLocalSession } from "../localHistory";
+import { useDocumentMeta } from "../useDocumentMeta";
 
 export default function CapacityHome() {
+  useDocumentMeta("Planificateur de capacité", "Estimez la capacité de votre prochain sprint selon la disponibilité réelle de chaque membre de l'équipe.");
   const [name, setName] = useState("");
   const [hostName, setHostName] = useState("");
   const nav = useNavigate();
