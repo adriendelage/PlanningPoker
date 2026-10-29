@@ -244,16 +244,24 @@ export default function Speedboat() {
 
   const nextZ = () => Object.values(notesRef.current).reduce((m, e) => Math.max(m, e.z || 0), 0) + 1;
 
-  const addNote = (zone) => {
-    const [bx, by, bw, bh] = zone.box;
+  const addNoteAt = (cx, cy) => {
     const nid = rid();
     const el = {
       type: "sticky", color, text: "", author: myName, fs: 15, w: NOTE_W, h: NOTE_H, z: nextZ(),
-      x: Math.round(bx + Math.random() * Math.max(0, bw - NOTE_W)),
-      y: Math.round(by + 10 + Math.random() * Math.max(0, bh - NOTE_H - 10)),
+      x: clamp(Math.round(cx - NOTE_W / 2), 0, W - NOTE_W),
+      y: clamp(Math.round(cy - NOTE_H / 2), 0, H - NOTE_H),
     };
     put(nid, el);
     setSelected(nid); setEditing(nid);
+  };
+
+  // Bouton d'une zone : pose le post-it à un endroit aléatoire de cette zone
+  const addNote = (zone) => {
+    const [bx, by, bw, bh] = zone.box;
+    addNoteAt(
+      bx + NOTE_W / 2 + Math.random() * Math.max(0, bw - NOTE_W),
+      by + 10 + NOTE_H / 2 + Math.random() * Math.max(0, bh - NOTE_H - 10),
+    );
   };
 
   const commitText = (elId, text) => {
@@ -285,6 +293,23 @@ export default function Speedboat() {
     setSelected(elId);
     dragRef.current = { id: elId, dx: p.x - el.x, dy: p.y - el.y, moved: false };
   };
+  // Clic sur le décor : pose un post-it à cet endroit. Si un post-it était sélectionné
+  // ou en cours d'édition, le premier clic sert seulement à le désélectionner.
+  const sceneClick = useRef(null);
+  const onSceneDown = (e) => {
+    sceneClick.current = { x: e.clientX, y: e.clientY, blocked: !!(selected || editing) };
+    setSelected(null);
+    document.activeElement?.blur?.();
+  };
+  const onSceneUp = (e) => {
+    const c = sceneClick.current;
+    sceneClick.current = null;
+    if (!c || c.blocked || !myName) return;
+    if (Math.hypot(e.clientX - c.x, e.clientY - c.y) > 6) return;
+    const p = toScene(e);
+    addNoteAt(p.x, p.y);
+  };
+
   const onNoteMove = (e) => {
     const d = dragRef.current;
     if (!d || d.mode === "resize") return;   // les mouvements de la poignée remontent jusqu'ici
@@ -426,7 +451,8 @@ export default function Speedboat() {
         <div ref={outerRef} style={{ width: "100%", overflowX: "auto", borderRadius: 16, border: "1px solid #222" }}>
           <div
             ref={sceneRef}
-            onPointerDown={() => { setSelected(null); document.activeElement?.blur?.(); }}
+            onPointerDown={onSceneDown}
+            onPointerUp={onSceneUp}
             style={{ position: "relative", width: W * scale, height: H * scale, overflow: "hidden", touchAction: "none" }}
           >
             <div style={{ position: "absolute", left: 0, top: 0, width: W, height: H, transformOrigin: "0 0", transform: `scale(${scale})` }}>
@@ -489,7 +515,7 @@ export default function Speedboat() {
 
             {list.length === 0 && (
               <div style={{ position: "absolute", left: 0, right: 0, top: "46%", textAlign: "center", color: "#cfe9f7", pointerEvents: "none", textShadow: "0 1px 6px #000" }}>
-                Choisis une zone ci-dessus pour poser ton premier post-it 🚤
+                Clique n'importe où sur l'image pour poser ton premier post-it 🚤
               </div>
             )}
           </div>
@@ -513,7 +539,7 @@ export default function Speedboat() {
         )}
 
         <p style={{ margin: "12px 2px 0", fontSize: 13, color: "#666", lineHeight: 1.6 }}>
-          Glisse un post-it pour le déplacer · tire le coin bas droit pour le redimensionner · double-clic pour modifier le texte ·
+          Clique sur l'image pour poser un post-it · glisse-le pour le déplacer · tire le coin bas droit pour le redimensionner · double-clic pour modifier le texte ·
           🗑 ou Suppr pour l'effacer · Entrée valide. Tout le monde voit les changements en direct.
         </p>
       </div>
