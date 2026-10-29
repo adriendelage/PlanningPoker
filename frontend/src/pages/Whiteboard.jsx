@@ -3,112 +3,45 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import socket from "../socket";
 import { addLocalSession, getLocalSessions } from "../localHistory";
 import { useDocumentMeta } from "../useDocumentMeta";
+import { ElementView, BOX_TYPES, TEXT_BOX_TYPES, LINE_TYPES, bounds } from "../whiteboard/shapes";
+import TemplatePicker from "../whiteboard/TemplatePicker";
 
 const ACCENT = "#4cc9f0";
-const COLORS = ["#fee440", "#ff9f1c", "#f15bb5", "#00f5d4", "#4cc9f0", "#9b5de5", "#8ac926", "#ffffff"];
-const BOX_TYPES = ["sticky", "text", "rect", "ellipse"];
+const COLORS = ["#fee440", "#ff9f1c", "#ff6b6b", "#f15bb5", "#c8a2ff", "#4cc9f0", "#00f5d4", "#8ac926", "#ffffff", "#9aa7b8"];
 const MIN_Z = 0.1, MAX_Z = 4;
 
-const TOOLS = [
-  { id: "select",  icon: "↖",  label: "Sélection (V)", key: "v" },
-  { id: "hand",    icon: "✋", label: "Déplacer la vue (H ou Espace)", key: "h" },
-  { id: "sticky",  icon: "🗒️", label: "Post-it (S)", key: "s" },
-  { id: "text",    icon: "T",  label: "Texte (T)", key: "t" },
-  { id: "rect",    icon: "▭",  label: "Rectangle (R)", key: "r" },
-  { id: "ellipse", icon: "◯",  label: "Ellipse (O)", key: "o" },
-  { id: "arrow",   icon: "➜",  label: "Flèche (A)", key: "a" },
-  { id: "pencil",  icon: "✏️", label: "Crayon (P)", key: "p" },
-  { id: "eraser",  icon: "🧽", label: "Gomme (E)", key: "e" },
+const SHAPES = [
+  { id: "rect", icon: "▭", label: "Rectangle (R)" },
+  { id: "ellipse", icon: "◯", label: "Ellipse (O)" },
+  { id: "diamond", icon: "◇", label: "Losange (D)" },
+  { id: "triangle", icon: "△", label: "Triangle" },
+  { id: "hexagon", icon: "⬡", label: "Hexagone" },
+  { id: "star", icon: "☆", label: "Étoile" },
 ];
+const CONNECTORS = [
+  { id: "arrow", icon: "➜", label: "Flèche (A)" },
+  { id: "line", icon: "╱", label: "Ligne (L)" },
+];
+const CHARTS = [
+  { id: "bar", icon: "📊", label: "Histogramme" },
+  { id: "line", icon: "📈", label: "Courbe" },
+  { id: "pie", icon: "🥧", label: "Camembert" },
+  { id: "donut", icon: "🍩", label: "Anneau" },
+];
+const EMOJIS = ["👍", "👎", "❤️", "⭐", "🔥", "💡", "✅", "❌", "❓", "❗", "🎯", "🚀", "🐞", "🔒", "⏰", "🏆", "😀", "😐", "😢", "😡", "🎉", "🙏", "👀", "🔵"];
+
+const KEYS = { v: "select", h: "hand", s: "sticky", t: "text", r: "rect", o: "ellipse", d: "diamond", a: "arrow", l: "line", p: "pencil", f: "frame", b: "table", g: "chart", e: "eraser" };
+
+const SAMPLE_CHART = "# Titre du graphique\nA: 12\nB: 19\nC: 8\nD: 15";
+const SAMPLE_TABLE = "Colonne A | Colonne B | Colonne C\n | | \n | | ";
+const DEFAULT_SIZE = {
+  rect: [160, 100], ellipse: [160, 100], diamond: [170, 120], triangle: [150, 130], hexagon: [170, 110], star: [140, 140],
+  frame: [420, 300], table: [420, 150], chart: [420, 280],
+};
+const DRAG_BOX_TYPES = ["rect", "ellipse", "diamond", "triangle", "hexagon", "star", "frame", "table", "chart"];
 
 const rid = () => Math.random().toString(36).slice(2, 10).padEnd(8, "0");
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-
-function bounds(el) {
-  if (BOX_TYPES.includes(el.type)) return { x: el.x, y: el.y, w: el.w, h: el.h };
-  const p = el.points || [];
-  let minX = 0, minY = 0, maxX = 0, maxY = 0;
-  for (let i = 0; i + 1 < p.length; i += 2) {
-    minX = Math.min(minX, p[i]); maxX = Math.max(maxX, p[i]);
-    minY = Math.min(minY, p[i + 1]); maxY = Math.max(maxY, p[i + 1]);
-  }
-  return { x: el.x + minX, y: el.y + minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
-}
-
-// Zone de saisie : le focus est pris juste après le montage, sinon le clic
-// qui vient de créer l'élément le lui reprend.
-function TextEditor({ initial, align, onDone }) {
-  const ref = useRef(null);
-  useEffect(() => {
-    const t = setTimeout(() => ref.current && ref.current.focus(), 30);
-    return () => clearTimeout(t);
-  }, []);
-  return (
-    <textarea
-      ref={ref}
-      defaultValue={initial}
-      onBlur={e => onDone(e.target.value)}
-      onKeyDown={e => {
-        if (e.key === "Escape" || (e.key === "Enter" && (e.ctrlKey || e.metaKey))) e.target.blur();
-        e.stopPropagation();
-      }}
-      style={{
-        width: "100%", height: "100%", background: "transparent", border: "none", outline: "none",
-        resize: "none", color: "inherit", font: "inherit", textAlign: align, padding: 0, userSelect: "text", WebkitUserSelect: "text",
-      }}
-    />
-  );
-}
-
-function ElementView({ el, id, editing, onCommit }) {
-  const common = { position: "absolute", left: el.x, top: el.y };
-
-  if (el.type === "pencil" || el.type === "arrow") {
-    const p = el.points;
-    let d, head = null;
-    if (el.type === "pencil") {
-      d = "M" + p[0] + " " + p[1];
-      for (let i = 2; i + 1 < p.length; i += 2) d += " L" + p[i] + " " + p[i + 1];
-    } else {
-      d = `M${p[0]} ${p[1]} L${p[2]} ${p[3]}`;
-      const ang = Math.atan2(p[3] - p[1], p[2] - p[0]);
-      const L = 12 + el.size * 2;
-      const a1 = ang + Math.PI * 0.85, a2 = ang - Math.PI * 0.85;
-      head = `${p[2]},${p[3]} ${p[2] + Math.cos(a1) * L},${p[3] + Math.sin(a1) * L} ${p[2] + Math.cos(a2) * L},${p[3] + Math.sin(a2) * L}`;
-    }
-    return (
-      <svg width="1" height="1" style={{ ...common, overflow: "visible", pointerEvents: "none" }}>
-        <g data-el={id}>
-          <path d={d} fill="none" stroke="transparent" strokeWidth={Math.max(el.size, 16)} style={{ pointerEvents: "stroke" }} />
-          <path d={d} fill="none" stroke={el.color} strokeWidth={el.size} strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: "none" }} />
-          {head && <polygon points={head} fill={el.color} style={{ pointerEvents: "none" }} />}
-        </g>
-      </svg>
-    );
-  }
-
-  const isSticky = el.type === "sticky";
-  const isText = el.type === "text";
-  const style = {
-    ...common, width: el.w, height: el.h, boxSizing: "border-box",
-    fontSize: el.fs, lineHeight: 1.3, overflow: "hidden", wordBreak: "break-word", whiteSpace: "pre-wrap",
-    userSelect: "none", fontFamily: "system-ui, sans-serif",
-  };
-  if (isSticky) Object.assign(style, { background: el.color, color: "#1a1a2e", padding: 12, borderRadius: 4, boxShadow: "0 6px 14px rgba(0,0,0,.45)" });
-  else if (isText) Object.assign(style, { color: el.color, padding: 4 });
-  else Object.assign(style, {
-    border: `3px solid ${el.color}`, background: el.color + "22", color: "#fff", padding: 8,
-    borderRadius: el.type === "ellipse" ? "50%" : 8, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center",
-  });
-
-  return (
-    <div data-el={id} style={style}>
-      {editing ? (
-        <TextEditor initial={el.text} align={isSticky || isText ? "left" : "center"} onDone={v => onCommit(id, v)} />
-      ) : el.text}
-    </div>
-  );
-}
 
 export default function Whiteboard() {
   const { id } = useParams();
@@ -125,6 +58,11 @@ export default function Whiteboard() {
   const [cursors, setCursors] = useState({});
   const [copied, setCopied] = useState(false);
   const [panning, setPanning] = useState(false);
+  const [menu, setMenu] = useState(null);                    // groupe d'outils déplié
+  const [picks, setPicks] = useState({ shape: "rect", conn: "arrow", chart: "bar", emoji: "👍" });
+  const [picker, setPicker] = useState(false);
+  const [modal, setModal] = useState(null);                  // édition d'un tableau / graphique / cadre
+  const [, bump] = useState(0);
   const [myName, setMyName] = useState(() => {
     try { return localStorage.getItem("wb_name") || "Invité " + Math.floor(10 + Math.random() * 90); } catch { return "Invité"; }
   });
@@ -136,6 +74,7 @@ export default function Whiteboard() {
   const elementsRef = useRef(elements);
   const toolRef = useRef(tool);
   const colorRef = useRef(color);
+  const picksRef = useRef(picks);
   const selectedRef = useRef(selected);
   const editingRef = useRef(editing);
   const dragRef = useRef(null);
@@ -145,13 +84,17 @@ export default function Whiteboard() {
   const lastCursor = useRef(0);
   const myNameRef = useRef(myName);
   const fitted = useRef(false);
+  const hist = useRef({ undo: [], redo: [] });
+  const draftRef = useRef(null);
   viewRef.current = view;
   elementsRef.current = elements;
   toolRef.current = tool;
   colorRef.current = color;
+  picksRef.current = picks;
   selectedRef.current = selected;
   editingRef.current = editing;
   myNameRef.current = myName;
+  draftRef.current = draft;
 
   // ─── Sync réseau ──────────────────────────────────────────────────────────
   const send = useCallback((elId, el) => socket.emit("whiteboard:upsert", { id, elId, el }), [id]);
@@ -166,7 +109,7 @@ export default function Whiteboard() {
       x1 = Math.min(x1, b.x); y1 = Math.min(y1, b.y);
       x2 = Math.max(x2, b.x + b.w); y2 = Math.max(y2, b.y + b.h);
     }
-    const W = box.clientWidth, H = box.clientHeight, pad = 60;
+    const W = box.clientWidth, H = box.clientHeight, pad = 70;
     const z = clamp(Math.min((W - pad * 2) / Math.max(1, x2 - x1), (H - pad * 2) / Math.max(1, y2 - y1)), MIN_Z, 1.5);
     setView({ z, x: (W - (x2 - x1) * z) / 2 - x1 * z, y: (H - (y2 - y1) * z) / 2 - y1 * z });
   }, []);
@@ -178,8 +121,9 @@ export default function Whiteboard() {
       setLoaded(true);
       if (!fitted.current) { fitted.current = true; setTimeout(() => fit(s.elements), 0); }
     };
+    const isLocalDrag = (elId) => dragRef.current && (dragRef.current.id === elId || (dragRef.current.group && dragRef.current.group[elId]));
     const onUpsert = ({ elId, el }) => {
-      if (dragRef.current && dragRef.current.id === elId) return;
+      if (isLocalDrag(elId)) return;
       setElements(prev => ({ ...prev, [elId]: el }));
     };
     const onDelete = ({ elId }) => {
@@ -223,8 +167,9 @@ export default function Whiteboard() {
     addLocalSession({ id, tool: "whiteboard", name, role: existing?.role || "guest" });
   }, [id, name, loaded]);
 
-  // ─── Helpers d'édition ────────────────────────────────────────────────────
+  // ─── Opérations de base (sans historique) ────────────────────────────────
   const nextZ = () => Object.values(elementsRef.current).reduce((m, e) => Math.max(m, e.z || 0), 0) + 1;
+  const backZ = () => Object.values(elementsRef.current).reduce((m, e) => Math.min(m, e.z || 0), 0) - 1;
 
   const putElement = useCallback((elId, el, sync = true) => {
     setElements(prev => ({ ...prev, [elId]: el }));
@@ -232,31 +177,85 @@ export default function Whiteboard() {
     if (sync) send(elId, el);
   }, [send]);
 
-  const removeElement = useCallback((elId) => {
+  const removeRaw = useCallback((elId) => {
+    if (!elementsRef.current[elId]) return;
     setElements(prev => { const n = { ...prev }; delete n[elId]; return n; });
     const n = { ...elementsRef.current }; delete n[elId]; elementsRef.current = n;
     setSelected(s => (s === elId ? null : s));
     socket.emit("whiteboard:delete", { id, elId });
   }, [id]);
 
+  const applyEl = useCallback((elId, el) => { if (el) putElement(elId, el); else removeRaw(elId); }, [putElement, removeRaw]);
+
+  // ─── Historique annuler / rétablir (local à chaque personne) ─────────────
+  const record = useCallback((changes) => {
+    const ch = changes.filter(c => JSON.stringify(c.before) !== JSON.stringify(c.after));
+    if (!ch.length) return;
+    hist.current.undo.push(ch);
+    if (hist.current.undo.length > 100) hist.current.undo.shift();
+    hist.current.redo = [];
+    bump(n => n + 1);
+  }, []);
+
+  const undo = useCallback(() => {
+    const ch = hist.current.undo.pop();
+    if (!ch) return;
+    [...ch].reverse().forEach(c => applyEl(c.id, c.before));
+    hist.current.redo.push(ch);
+    bump(n => n + 1);
+  }, [applyEl]);
+
+  const redo = useCallback(() => {
+    const ch = hist.current.redo.pop();
+    if (!ch) return;
+    ch.forEach(c => applyEl(c.id, c.after));
+    hist.current.undo.push(ch);
+    bump(n => n + 1);
+  }, [applyEl]);
+
+  // ─── Opérations avec historique ──────────────────────────────────────────
+  const createEl = useCallback((el) => {
+    const nid = rid();
+    putElement(nid, el);
+    record([{ id: nid, before: null, after: el }]);
+    return nid;
+  }, [putElement, record]);
+
+  const removeElement = useCallback((elId) => {
+    const el = elementsRef.current[elId];
+    if (!el) return;
+    record([{ id: elId, before: el, after: null }]);
+    removeRaw(elId);
+  }, [record, removeRaw]);
+
+  const changeElement = useCallback((elId, patch) => {
+    const el = elementsRef.current[elId];
+    if (!el) return;
+    const next = { ...el, ...patch };
+    putElement(elId, next);
+    record([{ id: elId, before: el, after: next }]);
+  }, [putElement, record]);
+
   const commitText = useCallback((elId, text) => {
     setEditing(null);
     const el = elementsRef.current[elId];
     if (!el) return;
-    if (el.type === "text" && !text.trim()) return removeElement(elId);
-    putElement(elId, { ...el, text });
-  }, [putElement, removeElement]);
+    if (el.type === "text" && !text.trim()) {
+      const last = hist.current.undo[hist.current.undo.length - 1];
+      if (last && last.length === 1 && last[0].id === elId && last[0].before === null) hist.current.undo.pop();   // création annulée
+      else record([{ id: elId, before: el, after: null }]);
+      bump(n => n + 1);
+      return removeRaw(elId);
+    }
+    changeElement(elId, { text });
+  }, [changeElement, record, removeRaw]);
 
-  const patchSelected = (patch) => {
-    const el = elementsRef.current[selectedRef.current];
-    if (el) putElement(selectedRef.current, { ...el, ...patch });
-  };
+  const patchSelected = (patch) => { if (selectedRef.current) changeElement(selectedRef.current, patch); };
 
   const duplicate = () => {
     const el = elementsRef.current[selectedRef.current];
     if (!el) return;
-    const nid = rid();
-    putElement(nid, { ...el, x: el.x + 24, y: el.y + 24, z: nextZ() });
+    const nid = createEl({ ...el, x: el.x + 24, y: el.y + 24, z: el.type === "frame" ? backZ() : nextZ() });
     setSelected(nid);
   };
 
@@ -274,7 +273,6 @@ export default function Whiteboard() {
     });
   }, []);
 
-  // Molette = zoom autour du curseur (écouteur non passif pour bloquer le scroll de la page)
   useEffect(() => {
     const box = boxRef.current;
     if (!box) return;
@@ -287,30 +285,84 @@ export default function Whiteboard() {
     return () => box.removeEventListener("wheel", onWheel);
   }, [zoomAt, loaded]);
 
+  // ─── Modèles ──────────────────────────────────────────────────────────────
+  const insertTemplate = (tpl) => {
+    const list = tpl.build();
+    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+    for (const e of list) {
+      const b = bounds(e);
+      x1 = Math.min(x1, b.x); y1 = Math.min(y1, b.y); x2 = Math.max(x2, b.x + b.w); y2 = Math.max(y2, b.y + b.h);
+    }
+    const box = boxRef.current;
+    const v = viewRef.current;
+    const cw = box.clientWidth, ch = box.clientHeight;
+    // on adapte le zoom si le modèle déborde de l'écran
+    let z = v.z;
+    if ((x2 - x1) * z > cw * 0.88 || (y2 - y1) * z > ch * 0.82) z = clamp(Math.min((cw * 0.88) / (x2 - x1), (ch * 0.82) / (y2 - y1)), MIN_Z, 1);
+    // Tableau vide : le modèle va au centre de la vue. Sinon il se place à droite
+    // du contenu existant pour ne rien recouvrir, et la vue se recentre dessus.
+    const existing = Object.values(elementsRef.current);
+    let centerX = (cw / 2 - v.x) / v.z, centerY = (ch / 2 - v.y) / v.z, moveView = false;
+    if (existing.length) {
+      let ex2 = -Infinity, ey1 = Infinity;
+      for (const e of existing) { const b = bounds(e); ex2 = Math.max(ex2, b.x + b.w); ey1 = Math.min(ey1, b.y); }
+      centerX = ex2 + 140 + (x2 - x1) / 2;
+      centerY = ey1 + (y2 - y1) / 2;
+      moveView = true;
+    }
+    const ox = centerX - (x1 + x2) / 2, oy = centerY - (y1 + y2) / 2;
+    const zTop = nextZ(), zBack = backZ();
+    let a = 0, b2 = 0;
+    const changes = [];
+    for (const e of list) {
+      const nid = rid();
+      const el = { ...e, x: Math.round(e.x + ox), y: Math.round(e.y + oy), z: e.type === "frame" ? zBack - (list.length - b2++) : zTop + a++ };
+      if (!el.author && el.type === "sticky") el.author = myNameRef.current;
+      putElement(nid, el);
+      changes.push({ id: nid, before: null, after: el });
+    }
+    record(changes);
+    if (moveView || z !== v.z) setView({ z, x: cw / 2 - centerX * z, y: ch / 2 - centerY * z });
+    setPicker(false);
+    setTool("select");
+  };
+
   // ─── Clavier ──────────────────────────────────────────────────────────────
   useEffect(() => {
     const down = (e) => {
       const t = e.target;
-      if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT")) return;
+      if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.tagName === "SELECT")) return;
       if (e.code === "Space") { spaceRef.current = true; e.preventDefault(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && selectedRef.current) {
         e.preventDefault(); removeElement(selectedRef.current); return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") { e.preventDefault(); duplicate(); return; }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key === "Escape") { setSelected(null); setTool("select"); return; }
-      const tl = TOOLS.find(x => x.key === e.key.toLowerCase());
-      if (tl) setTool(tl.id);
+      if (e.key === "Escape") { setSelected(null); setTool("select"); setMenu(null); setPicker(false); setModal(null); return; }
+      const k = KEYS[e.key.toLowerCase()];
+      if (k) { setTool(k); setMenu(null); }
     };
     const up = (e) => { if (e.code === "Space") spaceRef.current = false; };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
-  }, [removeElement]); // eslint-disable-line
+  }, [removeElement, undo, redo]); // eslint-disable-line
 
   // ─── Pointeur ─────────────────────────────────────────────────────────────
+  const baseBox = (type, x, y, w, h) => {
+    const p = picksRef.current;
+    const el = { type, x, y, w, h, text: "", color: colorRef.current, fs: 16, z: type === "frame" ? backZ() : nextZ() };
+    if (type === "frame") el.text = "Cadre";
+    if (type === "table") { el.text = SAMPLE_TABLE; el.fs = 15; }
+    if (type === "chart") { el.text = SAMPLE_CHART; el.kind = p.chart; el.fs = 14; }
+    return el;
+  };
+
   const onPointerDown = (e) => {
     if (e.target.tagName === "TEXTAREA" || e.target.closest("[data-ui]")) return;
+    setMenu(null);
     boxRef.current.setPointerCapture?.(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
@@ -340,7 +392,7 @@ export default function Whiteboard() {
     if (tl === "select") {
       if (hitHandle && selectedRef.current) {
         const el = elementsRef.current[selectedRef.current];
-        dragRef.current = { mode: "resize", id: selectedRef.current, wx: w.x, wy: w.y, ow: el.w, oh: el.h };
+        dragRef.current = { mode: "resize", id: selectedRef.current, wx: w.x, wy: w.y, ow: el.w, oh: el.h, before: { ...el } };
         return;
       }
       if (hitEl) {
@@ -348,7 +400,16 @@ export default function Whiteboard() {
         const el = elementsRef.current[elId];
         if (!el) return;
         setSelected(elId);
-        dragRef.current = { mode: "move", id: elId, wx: w.x, wy: w.y, ox: el.x, oy: el.y, moved: false };
+        const group = { [elId]: { ...el } };
+        if (el.type === "frame") {          // déplacer un cadre emporte ce qu'il contient
+          for (const [cid, c] of Object.entries(elementsRef.current)) {
+            if (cid === elId || c.type === "frame") continue;
+            const b = bounds(c);
+            const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+            if (cx >= el.x && cx <= el.x + el.w && cy >= el.y && cy <= el.y + el.h) group[cid] = { ...c };
+          }
+        }
+        dragRef.current = { mode: "move", id: elId, wx: w.x, wy: w.y, group, moved: false };
         return;
       }
       setSelected(null);
@@ -364,20 +425,30 @@ export default function Whiteboard() {
     }
 
     if (tl === "sticky" || tl === "text") {
-      const nid = rid();
       const el = tl === "sticky"
-        ? { type: "sticky", x: w.x - 90, y: w.y - 80, w: 180, h: 160, text: "", color: colorRef.current, fs: 18, z: nextZ() }
+        ? { type: "sticky", x: w.x - 90, y: w.y - 80, w: 180, h: 160, text: "", color: colorRef.current, fs: 18, z: nextZ(), author: myNameRef.current }
         : { type: "text", x: w.x, y: w.y - 14, w: 240, h: 60, text: "", color: colorRef.current === "#fee440" ? "#ffffff" : colorRef.current, fs: 22, z: nextZ() };
-      putElement(nid, el);
+      const nid = createEl(el);
       setSelected(nid); setEditing(nid); setTool("select");
       return;
     }
 
-    if (tl === "rect" || tl === "ellipse" || tl === "arrow") {
+    if (tl === "emoji") {
+      const size = 56;
+      const nid = createEl({ type: "emoji", x: w.x - size * 0.6, y: w.y - size * 0.6, w: size * 1.2, h: size * 1.2, text: picksRef.current.emoji, color: "#ffffff", fs: size, z: nextZ() });
+      setSelected(nid); setTool("select");
+      return;
+    }
+
+    if (DRAG_BOX_TYPES.includes(tl)) {
       dragRef.current = { mode: "draw", type: tl, sx: w.x, sy: w.y };
-      setDraft(tl === "arrow"
-        ? { type: "arrow", x: w.x, y: w.y, points: [0, 0, 0, 0], size: 3, color: colorRef.current, z: 0 }
-        : { type: tl, x: w.x, y: w.y, w: 1, h: 1, text: "", color: colorRef.current, fs: 16, z: 0 });
+      setDraft(baseBox(tl, w.x, w.y, 1, 1));
+      return;
+    }
+
+    if (tl === "arrow" || tl === "line") {
+      dragRef.current = { mode: "draw", type: tl, sx: w.x, sy: w.y };
+      setDraft({ type: tl, x: w.x, y: w.y, points: [0, 0, 0, 0], size: 3, color: colorRef.current, z: 0 });
       return;
     }
 
@@ -387,11 +458,16 @@ export default function Whiteboard() {
     }
   };
 
+  const throttled = () => {
+    const t = Date.now();
+    if (t - lastSend.current > 50) { lastSend.current = t; return true; }
+    return false;
+  };
+
   const onPointerMove = (e) => {
     if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const d = dragRef.current;
 
-    // curseur partagé (limité à ~16 envois/s)
     const now = Date.now();
     if (now - lastCursor.current > 60 && boxRef.current) {
       lastCursor.current = now;
@@ -422,30 +498,28 @@ export default function Whiteboard() {
     }
     const w = toWorld(e.clientX, e.clientY);
     if (d.mode === "move") {
-      const el = elementsRef.current[d.id];
-      if (!el) return;
-      const nx = d.ox + (w.x - d.wx), ny = d.oy + (w.y - d.wy);
-      if (!d.moved && Math.hypot(nx - d.ox, ny - d.oy) < 2 / viewRef.current.z) return;
+      const dx = w.x - d.wx, dy = w.y - d.wy;
+      if (!d.moved && Math.hypot(dx, dy) < 2 / viewRef.current.z) return;
       d.moved = true;
-      const next = { ...el, x: nx, y: ny };
-      const t = Date.now();
-      const sync = t - lastSend.current > 50;
-      if (sync) lastSend.current = t;
-      putElement(d.id, next, sync);
+      const sync = throttled();
+      for (const [cid, orig] of Object.entries(d.group)) putElement(cid, { ...orig, x: orig.x + dx, y: orig.y + dy }, sync);
       return;
     }
     if (d.mode === "resize") {
       const el = elementsRef.current[d.id];
       if (!el) return;
-      const next = { ...el, w: Math.max(40, d.ow + (w.x - d.wx)), h: Math.max(30, d.oh + (w.y - d.wy)) };
-      const t = Date.now();
-      const sync = t - lastSend.current > 50;
-      if (sync) lastSend.current = t;
-      putElement(d.id, next, sync);
+      let next;
+      if (el.type === "emoji") {
+        const size = Math.max(28, d.ow + (w.x - d.wx));
+        next = { ...el, w: size, h: size, fs: Math.round(size / 1.2) };
+      } else {
+        next = { ...el, w: Math.max(40, d.ow + (w.x - d.wx)), h: Math.max(30, d.oh + (w.y - d.wy)) };
+      }
+      putElement(d.id, next, throttled());
       return;
     }
     if (d.mode === "draw") {
-      if (d.type === "arrow") setDraft(dr => dr && ({ ...dr, points: [0, 0, w.x - d.sx, w.y - d.sy] }));
+      if (d.type === "arrow" || d.type === "line") setDraft(dr => dr && ({ ...dr, points: [0, 0, w.x - d.sx, w.y - d.sy] }));
       else setDraft(dr => dr && ({
         ...dr, x: Math.min(d.sx, w.x), y: Math.min(d.sy, w.y),
         w: Math.max(1, Math.abs(w.x - d.sx)), h: Math.max(1, Math.abs(w.y - d.sy)),
@@ -475,24 +549,37 @@ export default function Whiteboard() {
     dragRef.current = null;
     if (!d) return;
 
-    if (d.mode === "move" || d.mode === "resize") {
+    if (d.mode === "move") {
+      if (!d.moved) return;
+      const changes = [];
+      for (const [cid, orig] of Object.entries(d.group)) {
+        const cur = elementsRef.current[cid];
+        if (cur) { send(cid, cur); changes.push({ id: cid, before: orig, after: cur }); }
+      }
+      record(changes);
+      return;
+    }
+    if (d.mode === "resize") {
       const el = elementsRef.current[d.id];
-      if (el && (d.mode === "resize" || d.moved)) send(d.id, el);
+      if (el) { send(d.id, el); record([{ id: d.id, before: d.before, after: el }]); }
       return;
     }
     if (d.mode === "draw") {
       const dr = draftRef.current;
       setDraft(null);
       if (!dr) return;
-      const nid = rid();
-      if (dr.type === "arrow") {
+      if (dr.type === "arrow" || dr.type === "line") {
         if (Math.hypot(dr.points[2], dr.points[3]) < 12) return;
-        putElement(nid, { ...dr, z: nextZ() });
-      } else {
-        const small = dr.w < 8 && dr.h < 8;
-        putElement(nid, { ...dr, w: small ? 160 : Math.max(30, dr.w), h: small ? 100 : Math.max(30, dr.h), z: nextZ() });
+        const nid = createEl({ ...dr, z: nextZ() });
+        setSelected(nid); setTool("select");
+        return;
       }
+      const small = dr.w < 8 && dr.h < 8;
+      const [dw, dh] = DEFAULT_SIZE[dr.type] || [160, 100];
+      const nid = createEl({ ...dr, w: small ? dw : Math.max(30, dr.w), h: small ? dh : Math.max(30, dr.h), z: dr.type === "frame" ? backZ() : nextZ() });
       setSelected(nid); setTool("select");
+      if (dr.type === "table" || dr.type === "chart" || dr.type === "frame") openModal(nid);
+      else if (TEXT_BOX_TYPES.includes(dr.type)) setEditing(nid);
       return;
     }
     if (d.mode === "pencil") {
@@ -500,12 +587,9 @@ export default function Whiteboard() {
       setDraft(null);
       if (!dr) return;
       const pts = dr.points.length < 4 ? [...dr.points, 0.5, 0.5] : dr.points;
-      putElement(rid(), { ...dr, points: pts, z: nextZ() });
+      createEl({ ...dr, points: pts, z: nextZ() });
     }
   };
-
-  const draftRef = useRef(null);
-  draftRef.current = draft;
 
   const onDoubleClick = (e) => {
     if (toolRef.current !== "select") return;
@@ -514,7 +598,33 @@ export default function Whiteboard() {
     if (!hit) return;
     const elId = hit.getAttribute("data-el");
     const el = elementsRef.current[elId];
-    if (el && BOX_TYPES.includes(el.type)) { setSelected(elId); setEditing(elId); }
+    if (!el) return;
+    setSelected(elId);
+    if (el.type === "table" || el.type === "chart" || el.type === "frame") openModal(elId);
+    else if (TEXT_BOX_TYPES.includes(el.type)) setEditing(elId);
+  };
+
+  // ─── Édition des tableaux / graphiques / cadres ──────────────────────────
+  const openModal = (elId) => {
+    const el = elementsRef.current[elId];
+    if (!el) return;
+    setModal({ id: elId, type: el.type, text: el.text || "", kind: el.kind || "bar" });
+  };
+  const saveModal = () => {
+    if (!modal) return;
+    const el = elementsRef.current[modal.id];
+    if (el) {
+      const patch = { text: modal.text };
+      if (el.type === "chart") patch.kind = modal.kind;
+      changeElement(modal.id, patch);
+    }
+    setModal(null);
+  };
+
+  const chooseTool = (t, group, value) => {
+    setTool(t);
+    setMenu(null);
+    if (group) setPicks(p => ({ ...p, [group]: value }));
   };
 
   const copy = () => {
@@ -535,6 +645,7 @@ export default function Whiteboard() {
   const clearAll = () => {
     if (!window.confirm("Effacer tout le tableau pour tout le monde ? Cette action est définitive.")) return;
     setElements({}); elementsRef.current = {}; setSelected(null);
+    hist.current = { undo: [], redo: [] }; bump(n => n + 1);
     socket.emit("whiteboard:clear", { id });
   };
 
@@ -563,13 +674,27 @@ export default function Whiteboard() {
   const selEl = selected ? elements[selected] : null;
   const selB = selEl ? bounds(selEl) : null;
   const handleSize = 16 / view.z;
-  const btn = (active) => ({
+  const canUndo = hist.current.undo.length > 0, canRedo = hist.current.redo.length > 0;
+  const btn = (active, disabled) => ({
     width: 38, height: 38, borderRadius: 9, border: "1px solid " + (active ? ACCENT : "#2a2a44"),
-    background: active ? ACCENT + "33" : "#14142a", color: "#fff", fontSize: 17, cursor: "pointer",
-    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0,
+    background: active ? ACCENT + "33" : "#14142a", color: disabled ? "#555" : "#fff", fontSize: 17, cursor: disabled ? "default" : "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0, opacity: disabled ? 0.5 : 1,
   });
+  const small = (extra = {}) => ({ ...btn(false), width: 30, height: 30, fontSize: 14, ...extra });
   const cursorStyle = tool === "select" ? "default" : tool === "hand" ? "grab" : tool === "eraser" ? "cell" : "crosshair";
   const gridSize = 28 * view.z;
+  const isShape = SHAPES.some(s => s.id === tool), isConn = CONNECTORS.some(s => s.id === tool);
+  const shapeIcon = SHAPES.find(s => s.id === picks.shape)?.icon, connIcon = CONNECTORS.find(s => s.id === picks.conn)?.icon;
+  const chartIcon = CHARTS.find(s => s.id === picks.chart)?.icon;
+  const hasSizeText = selEl && (TEXT_BOX_TYPES.includes(selEl.type) || selEl.type === "table" || selEl.type === "frame");
+  const flyoutStyle = { position: "absolute", left: 62, display: "flex", flexWrap: "wrap", gap: 6, padding: 8, background: "#14142af2", border: "1px solid #2a2a44", borderRadius: 12, zIndex: 20 };
+
+  const groupBtn = (key, icon, label, active) => (
+    <button title={label} onClick={() => setMenu(m => (m === key ? null : key))} style={{ ...btn(active || menu === key), position: "relative" }}>
+      {icon}
+      <span style={{ position: "absolute", right: 3, bottom: 1, fontSize: 8, color: "#888" }}>◢</span>
+    </button>
+  );
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0d0d1a", color: "#fff", overflow: "hidden", userSelect: "none", WebkitUserSelect: "none" }}>
@@ -577,15 +702,19 @@ export default function Whiteboard() {
       <header data-ui style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: "8px 14px", borderBottom: "1px solid #1c1c30", background: "#101022" }}>
         <a href="/" style={{ color: "#666", fontSize: 14, textDecoration: "none" }}>← Outils</a>
         <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>🧑‍🎨 {name || "Tableau blanc"}</h1>
+        <button onClick={() => setPicker(true)}
+          style={{ padding: "7px 13px", background: ACCENT, border: "none", borderRadius: 8, color: "#0d0d1a", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+          📋 Modèles
+        </button>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           <button onClick={rename} title="Changer ton nom affiché"
             style={{ padding: "6px 10px", background: "#14142a", border: "1px solid #2a2a44", borderRadius: 8, color: "#aaa", fontSize: 12.5, cursor: "pointer" }}>
             👤 {myName}
           </button>
-          <button onClick={() => zoomAt(1 / 1.25, boxRef.current.clientWidth / 2, boxRef.current.clientHeight / 2)} style={{ ...btn(false), width: 30, height: 30 }}>−</button>
+          <button onClick={() => zoomAt(1 / 1.25, boxRef.current.clientWidth / 2, boxRef.current.clientHeight / 2)} style={small()}>−</button>
           <span style={{ fontSize: 12.5, color: "#888", width: 42, textAlign: "center" }}>{Math.round(view.z * 100)}%</span>
-          <button onClick={() => zoomAt(1.25, boxRef.current.clientWidth / 2, boxRef.current.clientHeight / 2)} style={{ ...btn(false), width: 30, height: 30 }}>+</button>
-          <button onClick={() => fit()} title="Tout voir" style={{ ...btn(false), width: 30, height: 30, fontSize: 14 }}>⤢</button>
+          <button onClick={() => zoomAt(1.25, boxRef.current.clientWidth / 2, boxRef.current.clientHeight / 2)} style={small()}>+</button>
+          <button onClick={() => fit()} title="Tout voir" style={small()}>⤢</button>
           <button onClick={clearAll} title="Tout effacer"
             style={{ padding: "6px 10px", background: "#14142a", border: "1px solid #2a2a44", borderRadius: 8, color: "#ff6b6b", fontSize: 12.5, cursor: "pointer" }}>
             Tout effacer
@@ -647,69 +776,148 @@ export default function Whiteboard() {
           </div>
         ))}
 
-        {/* Barre d'options de l'élément sélectionné */}
-        {selEl && (
-          <div data-ui style={{
-            position: "absolute", left: "50%", bottom: 78, transform: "translateX(-50%)", maxWidth: "calc(100% - 20px)",
-            display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", overflowX: "auto",
-            background: "#14142aee", border: "1px solid #2a2a44", borderRadius: 12, backdropFilter: "blur(6px)",
-          }}>
-            {BOX_TYPES.includes(selEl.type) && (
-              <>
-                <button style={{ ...btn(false), width: 30, height: 30, fontSize: 12 }} title="Texte plus petit"
-                  onClick={() => patchSelected({ fs: clamp(Math.round(selEl.fs * 0.85), 8, 120) })}>A−</button>
-                <button style={{ ...btn(false), width: 30, height: 30, fontSize: 14 }} title="Texte plus grand"
-                  onClick={() => patchSelected({ fs: clamp(Math.round(selEl.fs * 1.18), 8, 120) })}>A+</button>
-              </>
-            )}
-            {(selEl.type === "arrow" || selEl.type === "pencil") && (
-              <>
-                <button style={{ ...btn(false), width: 30, height: 30, fontSize: 12 }} title="Trait plus fin"
-                  onClick={() => patchSelected({ size: clamp(selEl.size - 1, 1, 24) })}>━</button>
-                <button style={{ ...btn(false), width: 30, height: 30, fontSize: 16 }} title="Trait plus épais"
-                  onClick={() => patchSelected({ size: clamp(selEl.size + 2, 1, 24) })}>▬</button>
-              </>
-            )}
-            <button style={{ ...btn(false), width: 30, height: 30, fontSize: 14 }} title="Passer au premier plan"
-              onClick={() => patchSelected({ z: nextZ() })}>⬆</button>
-            <button style={{ ...btn(false), width: 30, height: 30, fontSize: 14 }} title="Dupliquer (Ctrl+D)" onClick={duplicate}>⧉</button>
-            <button style={{ ...btn(false), width: 30, height: 30, fontSize: 14 }} title="Supprimer (Suppr)"
-              onClick={() => removeElement(selected)}>🗑</button>
+        {/* Barre d'outils verticale */}
+        <div data-ui style={{
+          position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", maxHeight: "calc(100% - 20px)", overflowY: "auto", overflowX: "visible",
+          display: "flex", flexDirection: "column", gap: 5, padding: 7, background: "#14142aee", border: "1px solid #2a2a44", borderRadius: 14, zIndex: 10,
+        }}>
+          <button title="Sélection (V)" onClick={() => chooseTool("select")} style={btn(tool === "select")}>↖</button>
+          <button title="Déplacer la vue (H ou Espace)" onClick={() => chooseTool("hand")} style={btn(tool === "hand")}>✋</button>
+          <button title="Post-it (S)" onClick={() => chooseTool("sticky")} style={btn(tool === "sticky")}>🗒️</button>
+          <button title="Texte (T)" onClick={() => chooseTool("text")} style={btn(tool === "text")}>T</button>
+          {groupBtn("shapes", shapeIcon, "Formes", isShape)}
+          {groupBtn("conn", connIcon, "Connecteurs", isConn)}
+          <button title="Crayon (P)" onClick={() => chooseTool("pencil")} style={btn(tool === "pencil")}>✏️</button>
+          <button title="Cadre (F) — regroupe et déplace ce qu'il contient" onClick={() => chooseTool("frame")} style={btn(tool === "frame")}>⬚</button>
+          <button title="Tableau (B)" onClick={() => chooseTool("table")} style={btn(tool === "table")}>▦</button>
+          {groupBtn("charts", chartIcon, "Graphiques", tool === "chart")}
+          {groupBtn("emoji", picks.emoji, "Émojis et tampons", tool === "emoji")}
+          <button title="Gomme (E)" onClick={() => chooseTool("eraser")} style={btn(tool === "eraser")}>🧽</button>
+          <div style={{ height: 1, background: "#2a2a44", margin: "2px 0" }} />
+          <button title="Annuler (Ctrl+Z)" disabled={!canUndo} onClick={undo} style={btn(false, !canUndo)}>↶</button>
+          <button title="Rétablir (Ctrl+Maj+Z)" disabled={!canRedo} onClick={redo} style={btn(false, !canRedo)}>↷</button>
+        </div>
+
+        {/* Menus déroulants des groupes d'outils */}
+        {menu === "shapes" && (
+          <div data-ui style={{ ...flyoutStyle, top: "30%", width: 140 }}>
+            {SHAPES.map(s => <button key={s.id} title={s.label} onClick={() => chooseTool(s.id, "shape", s.id)} style={btn(tool === s.id)}>{s.icon}</button>)}
+          </div>
+        )}
+        {menu === "conn" && (
+          <div data-ui style={{ ...flyoutStyle, top: "36%" }}>
+            {CONNECTORS.map(s => <button key={s.id} title={s.label} onClick={() => chooseTool(s.id, "conn", s.id)} style={btn(tool === s.id)}>{s.icon}</button>)}
+          </div>
+        )}
+        {menu === "charts" && (
+          <div data-ui style={{ ...flyoutStyle, top: "46%", width: 140 }}>
+            {CHARTS.map(s => <button key={s.id} title={s.label} onClick={() => chooseTool("chart", "chart", s.id)} style={btn(tool === "chart" && picks.chart === s.id)}>{s.icon}</button>)}
+          </div>
+        )}
+        {menu === "emoji" && (
+          <div data-ui style={{ ...flyoutStyle, top: "40%", width: 250 }}>
+            {EMOJIS.map(em => <button key={em} onClick={() => chooseTool("emoji", "emoji", em)} style={{ ...btn(tool === "emoji" && picks.emoji === em), width: 34, height: 34, fontSize: 18 }}>{em}</button>)}
           </div>
         )}
 
-        {/* Barre d'outils */}
+        {/* Barre contextuelle : couleurs et options de l'élément sélectionné */}
         <div data-ui style={{
-          position: "absolute", left: "50%", bottom: 14, transform: "translateX(-50%)", maxWidth: "calc(100% - 20px)",
+          position: "absolute", left: "50%", bottom: 14, transform: "translateX(-50%)", maxWidth: "calc(100% - 100px)",
           display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", overflowX: "auto",
-          background: "#14142aee", border: "1px solid #2a2a44", borderRadius: 14, backdropFilter: "blur(6px)",
+          background: "#14142aee", border: "1px solid #2a2a44", borderRadius: 14, zIndex: 10,
         }}>
-          {TOOLS.map(t => (
-            <button key={t.id} title={t.label} onClick={() => setTool(t.id)} style={btn(tool === t.id)}>{t.icon}</button>
-          ))}
-          <div style={{ width: 1, height: 26, background: "#2a2a44", margin: "0 4px", flexShrink: 0 }} />
           {COLORS.map(c => {
-            const current = selEl ? selEl.color : color;
+            const current = (selEl && selEl.color) || color;
             return (
               <button key={c} title={c}
-                onClick={() => { setColor(c); if (selEl) patchSelected({ color: c }); }}
+                onClick={() => { setColor(c); if (selEl && selEl.type !== "emoji") patchSelected({ color: c }); }}
                 style={{
                   width: 24, height: 24, borderRadius: "50%", background: c, flexShrink: 0, cursor: "pointer", padding: 0,
-                  border: current.toLowerCase() === c ? "3px solid #fff" : "2px solid #0d0d1a",
+                  border: current.toLowerCase() === c ? "3px solid #fff" : "2px solid #555",
                   boxShadow: current.toLowerCase() === c ? "0 0 0 1px " + ACCENT : "none",
                 }} />
             );
           })}
+          {selEl && <div style={{ width: 1, height: 26, background: "#2a2a44", margin: "0 4px", flexShrink: 0 }} />}
+          {hasSizeText && (
+            <>
+              <button style={small({ fontSize: 12 })} title="Texte plus petit" onClick={() => patchSelected({ fs: clamp(Math.round(selEl.fs * 0.85), 8, 120) })}>A−</button>
+              <button style={small()} title="Texte plus grand" onClick={() => patchSelected({ fs: clamp(Math.round(selEl.fs * 1.18), 8, 120) })}>A+</button>
+            </>
+          )}
+          {selEl && LINE_TYPES.includes(selEl.type) && (
+            <>
+              <button style={small({ fontSize: 12 })} title="Trait plus fin" onClick={() => patchSelected({ size: clamp(selEl.size - 1, 1, 24) })}>━</button>
+              <button style={small({ fontSize: 16 })} title="Trait plus épais" onClick={() => patchSelected({ size: clamp(selEl.size + 2, 1, 24) })}>▬</button>
+            </>
+          )}
+          {selEl && selEl.type === "chart" && CHARTS.map(c => (
+            <button key={c.id} style={small({ ...(selEl.kind === c.id ? { border: "1px solid " + ACCENT, background: ACCENT + "33" } : {}) })} title={c.label} onClick={() => patchSelected({ kind: c.id })}>{c.icon}</button>
+          ))}
+          {selEl && (selEl.type === "chart" || selEl.type === "table" || selEl.type === "frame") && (
+            <button style={small()} title="Modifier le contenu (double-clic)" onClick={() => openModal(selected)}>✎</button>
+          )}
+          {selEl && (
+            <>
+              <button style={small()} title="Premier plan" onClick={() => patchSelected({ z: nextZ() })}>⬆</button>
+              <button style={small()} title="Arrière-plan" onClick={() => patchSelected({ z: backZ() })}>⬇</button>
+              <button style={small()} title="Dupliquer (Ctrl+D)" onClick={duplicate}>⧉</button>
+              <button style={small()} title="Supprimer (Suppr)" onClick={() => removeElement(selected)}>🗑</button>
+            </>
+          )}
         </div>
 
         {Object.keys(elements).length === 0 && !draft && (
-          <div style={{ position: "absolute", left: 0, right: 0, top: "38%", textAlign: "center", color: "#444", pointerEvents: "none", padding: "0 20px" }}>
+          <div style={{ position: "absolute", left: 0, right: 0, top: "34%", textAlign: "center", color: "#555", pointerEvents: "none", padding: "0 20px" }}>
             <div style={{ fontSize: 40 }}>🗒️</div>
-            <div style={{ fontSize: 15, marginTop: 6 }}>Tableau vide — choisis le post-it 🗒️ en bas, puis clique ici.</div>
-            <div style={{ fontSize: 12.5, marginTop: 4 }}>Molette = zoom · Espace + glisser = déplacer la vue · double-clic = éditer le texte</div>
+            <div style={{ fontSize: 15, marginTop: 6 }}>Tableau vide — pose un post-it avec la barre à gauche, ou pars d'un modèle avec « 📋 Modèles ».</div>
+            <div style={{ fontSize: 12.5, marginTop: 4 }}>Molette = zoom · Espace + glisser = déplacer la vue · double-clic = éditer</div>
           </div>
         )}
       </div>
+
+      {picker && <TemplatePicker onPick={insertTemplate} onClose={() => setPicker(false)} />}
+
+      {modal && (
+        <div data-ui onPointerDown={e => e.stopPropagation()} onClick={() => setModal(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(5,5,15,.75)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ width: "100%", maxWidth: 520, background: "#111", border: "1px solid #2a2a44", borderRadius: 16, padding: "22px 22px 18px", color: "#fff" }}>
+            <h2 style={{ margin: "0 0 4px", fontSize: 18 }}>
+              {modal.type === "chart" ? "📊 Données du graphique" : modal.type === "table" ? "▦ Contenu du tableau" : "⬚ Titre du cadre"}
+            </h2>
+            <p style={{ margin: "0 0 12px", fontSize: 13, color: "#888", lineHeight: 1.5 }}>
+              {modal.type === "chart" && <>Une ligne par donnée : <code>Libellé: valeur</code>. Une ligne commençant par <code>#</code> sert de titre.</>}
+              {modal.type === "table" && <>Une ligne par rangée, cellules séparées par <code>|</code>. La première ligne sert d'en-tête.</>}
+              {modal.type === "frame" && <>Le cadre emporte avec lui ce qu'il contient quand on le déplace par son titre.</>}
+            </p>
+            {modal.type === "chart" && (
+              <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                {CHARTS.map(c => (
+                  <button key={c.id} onClick={() => setModal(m => ({ ...m, kind: c.id }))}
+                    style={{ padding: "7px 12px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600,
+                      background: modal.kind === c.id ? ACCENT + "33" : "#1a1a2e", border: `1px solid ${modal.kind === c.id ? ACCENT : "#333"}`, color: modal.kind === c.id ? ACCENT : "#aaa" }}>
+                    {c.icon} {c.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {modal.type === "frame" ? (
+              <input autoFocus value={modal.text} maxLength={60} onChange={e => setModal(m => ({ ...m, text: e.target.value }))}
+                onKeyDown={e => { if (e.key === "Enter") saveModal(); e.stopPropagation(); }}
+                style={{ width: "100%", boxSizing: "border-box", padding: "11px 13px", background: "#1a1a2e", border: "1px solid #444", borderRadius: 9, color: "#fff", fontSize: 15, outline: "none", userSelect: "text" }} />
+            ) : (
+              <textarea autoFocus value={modal.text} rows={9} onChange={e => setModal(m => ({ ...m, text: e.target.value }))}
+                onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) saveModal(); e.stopPropagation(); }}
+                style={{ width: "100%", boxSizing: "border-box", padding: "11px 13px", background: "#1a1a2e", border: "1px solid #444", borderRadius: 9, color: "#fff", fontSize: 14, outline: "none", fontFamily: "monospace", resize: "vertical", userSelect: "text" }} />
+            )}
+            <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
+              <button onClick={() => setModal(null)} style={{ padding: "9px 16px", background: "#1a1a2e", border: "1px solid #333", borderRadius: 9, color: "#aaa", cursor: "pointer", fontSize: 14 }}>Annuler</button>
+              <button onClick={saveModal} style={{ padding: "9px 18px", background: ACCENT, border: "none", borderRadius: 9, color: "#0d0d1a", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>Enregistrer</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
