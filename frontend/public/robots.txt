@@ -23,6 +23,7 @@ Disallow: /postmortem/
 Disallow: /flags/
 Disallow: /pulse/
 Disallow: /whiteboard/
+Disallow: /speedboat/
 
 # Espace de travail connecté : privé, derrière authentification.
 Disallow: /app

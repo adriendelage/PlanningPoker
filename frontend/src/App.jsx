@@ -35,6 +35,8 @@ import FlagsHome from "./pages/FlagsHome.jsx";
 import Flags from "./pages/Flags.jsx";
 import WhiteboardHome from "./pages/WhiteboardHome.jsx";
 import Whiteboard from "./pages/Whiteboard.jsx";
+import SpeedboatHome from "./pages/SpeedboatHome.jsx";
+import Speedboat from "./pages/Speedboat.jsx";
 import PulseHome from "./pages/PulseHome.jsx";
 import Pulse from "./pages/Pulse.jsx";
 import Wheel from "./pages/Wheel.jsx";
@@ -123,6 +125,10 @@ export default function App(){
       {/* Tableau blanc */}
       <Route path="/whiteboard" element={<WhiteboardHome/>}/>
       <Route path="/whiteboard/:id" element={<Whiteboard/>}/>
+
+      {/* Rétrospective Speed Boat */}
+      <Route path="/speedboat" element={<SpeedboatHome/>}/>
+      <Route path="/speedboat/:id" element={<Speedboat/>}/>
 
       {/* Roue de décision — 100% client, pas de session */}
       <Route path="/wheel" element={<Wheel/>}/>

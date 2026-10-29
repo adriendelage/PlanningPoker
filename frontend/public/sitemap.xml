@@ -86,6 +86,11 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://mr1dridri.netlify.app/speedboat</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://mr1dridri.netlify.app/wheel</loc>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>

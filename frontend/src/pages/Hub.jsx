@@ -167,6 +167,16 @@ const TOOLS = [
     active: true,
   },
   {
+    id: "speedboat",
+    icon: "🚤",
+    suit: "⚓",
+    name: "Rétro Speed Boat",
+    desc: "Vent, ancres, rochers, île : l'équipe colle ses post-its de couleur directement sur le bateau, en direct.",
+    accent: "#00bbf9",
+    path: "/speedboat",
+    active: true,
+  },
+  {
     id: "wheel",
     icon: "🎡",
     suit: "○",
@@ -216,6 +226,7 @@ const TOOL_META = {
   flags:      { icon: "🚩", accent: "#6a4c93" },
   pulse:      { icon: "💓", accent: "#ff6b9d" },
   whiteboard: { icon: "🧑‍🎨", accent: "#4cc9f0" },
+  speedboat:  { icon: "🚤", accent: "#00bbf9" },
 };
 
 function fmtDate(ts) {

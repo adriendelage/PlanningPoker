@@ -950,7 +950,7 @@ async function whiteboardClear(sessionId) {
 
 async function whiteboardLoadBoard(id) {
   if (!enabled()) return null;
-  const s = await pool.query(`SELECT * FROM sessions WHERE id = $1 AND tool = 'whiteboard'`, [id]);
+  const s = await pool.query(`SELECT * FROM sessions WHERE id = $1 AND tool IN ('whiteboard', 'speedboat')`, [id]);
   if (s.rows.length === 0) return null;
   const r = await pool.query(
     `SELECT el_id, data FROM whiteboard_elements WHERE session_id = $1`,

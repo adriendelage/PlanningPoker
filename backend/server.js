@@ -1522,10 +1522,12 @@ io.on("connection", socket => {
 
   socket.on("whiteboard:create", (data, cb) => {
     const id = Math.random().toString(36).substring(2, 8);
+    // Le Speed Boat réutilise le même moteur (éléments + temps réel), avec son propre type de session
+    const wbTool = data.tool === "speedboat" ? "speedboat" : "whiteboard";
     whiteboards[id] = { name: data.name || null, elements: {} };
     socket.join("whiteboard:" + id);
     cb(id);
-    db.createSession({ id, name: data.name, hostName: data.hostName, tool: "whiteboard", taskCount: 0 })
+    db.createSession({ id, name: data.name, hostName: data.hostName, tool: wbTool, taskCount: 0 })
       .catch(e => console.error("DB createSession:", e.message));
   });
 
