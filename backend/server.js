@@ -504,7 +504,8 @@ function sanitizeWbElement(raw) {
     el.points = pts.map(n => wbNum(n, -100000, 100000, 0));
     if (el.points.length % 2 === 1) el.points.pop();
     if (el.points.length < 4) return null;
-    el.size = wbNum(raw.size, 1, 24, 3);
+    el.size = wbNum(raw.size, 1, 40, 3);
+    if (raw.hl === true && el.type === "pencil") el.hl = true;
   }
   return el;
 }

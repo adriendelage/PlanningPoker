@@ -200,7 +200,7 @@ export function ElementView({ el, id, editing, onCommit }) {
       <svg width="1" height="1" style={{ ...common, overflow: "visible", pointerEvents: "none" }}>
         <g data-el={id}>
           <path d={d} fill="none" stroke="transparent" strokeWidth={Math.max(el.size, 16)} style={{ pointerEvents: "stroke" }} />
-          <path d={d} fill="none" stroke={el.color} strokeWidth={el.size} strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: "none" }} />
+          <path d={d} fill="none" stroke={el.color} strokeWidth={el.size} strokeLinecap="round" strokeLinejoin="round" strokeOpacity={el.hl ? 0.4 : 1} style={{ pointerEvents: "none" }} />
           {head && <polygon points={head} fill={el.color} style={{ pointerEvents: "none" }} />}
         </g>
       </svg>

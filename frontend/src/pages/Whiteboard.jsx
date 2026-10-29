@@ -30,7 +30,18 @@ const CHARTS = [
 ];
 const EMOJIS = ["👍", "👎", "❤️", "⭐", "🔥", "💡", "✅", "❌", "❓", "❗", "🎯", "🚀", "🐞", "🔒", "⏰", "🏆", "😀", "😐", "😢", "😡", "🎉", "🙏", "👀", "🔵"];
 
-const KEYS = { v: "select", h: "hand", s: "sticky", t: "text", r: "rect", o: "ellipse", d: "diamond", a: "arrow", l: "line", p: "pencil", f: "frame", b: "table", g: "chart", e: "eraser" };
+const KEYS = { v: "select", h: "hand", s: "sticky", t: "text", r: "rect", o: "ellipse", d: "diamond", a: "arrow", l: "line", p: "pencil", i: "highlighter", q: "lasso", f: "frame", b: "table", g: "chart", e: "eraser", x: "eraserInk" };
+const PEN_SIZES = [2, 4, 8];
+const HL_SIZES = [14, 22, 34];
+const PEN_TOOLS = ["pencil", "highlighter", "eraser", "eraserInk", "lasso"];
+const pointInPoly = (x, y, pts) => {
+  let inside = false;
+  for (let i = 0, j = pts.length - 2; i < pts.length; j = i, i += 2) {
+    const xi = pts[i], yi = pts[i + 1], xj = pts[j], yj = pts[j + 1];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+};
 
 const SAMPLE_CHART = "# Titre du graphique\nA: 12\nB: 19\nC: 8\nD: 15";
 const SAMPLE_TABLE = "Colonne A | Colonne B | Colonne C\n | | \n | | ";
@@ -59,8 +70,10 @@ export default function Whiteboard() {
   const [copied, setCopied] = useState(false);
   const [panning, setPanning] = useState(false);
   const [menu, setMenu] = useState(null);                    // groupe d'outils déplié
-  const [picks, setPicks] = useState({ shape: "rect", conn: "arrow", chart: "bar", emoji: "👍" });
+  const [picks, setPicks] = useState({ pen: "pencil", shape: "rect", conn: "arrow", chart: "bar", emoji: "👍" });
   const [picker, setPicker] = useState(false);
+  const [multi, setMulti] = useState([]);                    // sélection multiple (lasso)
+  const [penSize, setPenSize] = useState(1);                 // index dans PEN_SIZES / HL_SIZES
   const [modal, setModal] = useState(null);                  // édition d'un tableau / graphique / cadre
   const [, bump] = useState(0);
   const [myName, setMyName] = useState(() => {
@@ -86,6 +99,8 @@ export default function Whiteboard() {
   const fitted = useRef(false);
   const hist = useRef({ undo: [], redo: [] });
   const draftRef = useRef(null);
+  const multiRef = useRef([]);
+  const penSizeRef = useRef(1);
   viewRef.current = view;
   elementsRef.current = elements;
   toolRef.current = tool;
@@ -95,6 +110,8 @@ export default function Whiteboard() {
   editingRef.current = editing;
   myNameRef.current = myName;
   draftRef.current = draft;
+  multiRef.current = multi;
+  penSizeRef.current = penSize;
 
   // ─── Sync réseau ──────────────────────────────────────────────────────────
   const send = useCallback((elId, el) => socket.emit("whiteboard:upsert", { id, elId, el }), [id]);
@@ -259,6 +276,38 @@ export default function Whiteboard() {
     setSelected(nid);
   };
 
+  const removeMulti = () => {
+    const ids = multiRef.current.filter(id => elementsRef.current[id]);
+    record(ids.map(id => ({ id, before: elementsRef.current[id], after: null })));
+    ids.forEach(id => removeRaw(id));
+    setMulti([]);
+  };
+  const patchMulti = (patch) => {
+    const changes = [];
+    for (const id of multiRef.current) {
+      const el = elementsRef.current[id];
+      if (!el || el.type === "emoji") continue;
+      const next = { ...el, ...patch };
+      putElement(id, next);
+      changes.push({ id, before: el, after: next });
+    }
+    record(changes);
+  };
+  const duplicateMulti = () => {
+    const nids = [], changes = [];
+    for (const id of multiRef.current) {
+      const el = elementsRef.current[id];
+      if (!el) continue;
+      const nid = rid();
+      const next = { ...el, x: el.x + 24, y: el.y + 24, z: el.type === "frame" ? backZ() : nextZ() };
+      putElement(nid, next);
+      changes.push({ id: nid, before: null, after: next });
+      nids.push(nid);
+    }
+    record(changes);
+    setMulti(nids);
+  };
+
   const toWorld = (cx, cy) => {
     const r = boxRef.current.getBoundingClientRect();
     const v = viewRef.current;
@@ -335,12 +384,15 @@ export default function Whiteboard() {
       if (e.code === "Space") { spaceRef.current = true; e.preventDefault(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
+      if ((e.key === "Delete" || e.key === "Backspace") && multiRef.current.length) {
+        e.preventDefault(); removeMulti(); return;
+      }
       if ((e.key === "Delete" || e.key === "Backspace") && selectedRef.current) {
         e.preventDefault(); removeElement(selectedRef.current); return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") { e.preventDefault(); duplicate(); return; }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key === "Escape") { setSelected(null); setTool("select"); setMenu(null); setPicker(false); setModal(null); return; }
+      if (e.key === "Escape") { setSelected(null); setMulti([]); setTool("select"); setMenu(null); setPicker(false); setModal(null); return; }
       const k = KEYS[e.key.toLowerCase()];
       if (k) { setTool(k); setMenu(null); }
     };
@@ -358,6 +410,16 @@ export default function Whiteboard() {
     if (type === "table") { el.text = SAMPLE_TABLE; el.fs = 15; }
     if (type === "chart") { el.text = SAMPLE_CHART; el.kind = p.chart; el.fs = 14; }
     return el;
+  };
+
+  // Gomme : un geste = une seule entrée d'historique
+  const eraseAt = (d, hit) => {
+    if (!hit) return;
+    const id = hit.getAttribute("data-el");
+    const el = elementsRef.current[id];
+    if (!el || (d.ink && el.type !== "pencil")) return;
+    d.batch.push({ id, before: el, after: null });
+    removeRaw(id);
   };
 
   const onPointerDown = (e) => {
@@ -395,6 +457,13 @@ export default function Whiteboard() {
         dragRef.current = { mode: "resize", id: selectedRef.current, wx: w.x, wy: w.y, ow: el.w, oh: el.h, before: { ...el } };
         return;
       }
+      if (hitEl && multiRef.current.includes(hitEl.getAttribute("data-el"))) {   // déplacement du groupe sélectionné au lasso
+        const group = {};
+        for (const mid of multiRef.current) if (elementsRef.current[mid]) group[mid] = { ...elementsRef.current[mid] };
+        dragRef.current = { mode: "move", id: hitEl.getAttribute("data-el"), wx: w.x, wy: w.y, group, moved: false };
+        return;
+      }
+      if (multiRef.current.length) setMulti([]);
       if (hitEl) {
         const elId = hitEl.getAttribute("data-el");
         const el = elementsRef.current[elId];
@@ -418,9 +487,17 @@ export default function Whiteboard() {
       return;
     }
 
-    if (tl === "eraser") {
-      dragRef.current = { mode: "erase" };
-      if (hitEl) removeElement(hitEl.getAttribute("data-el"));
+    if (tl === "eraser" || tl === "eraserInk") {
+      dragRef.current = { mode: "erase", ink: tl === "eraserInk", batch: [] };
+      eraseAt(dragRef.current, hitEl);
+      return;
+    }
+
+    if (tl === "lasso") {
+      if (multiRef.current.length) setMulti([]);
+      setSelected(null);
+      dragRef.current = { mode: "lasso" };
+      setDraft({ type: "lasso", pts: [w.x, w.y] });
       return;
     }
 
@@ -452,9 +529,10 @@ export default function Whiteboard() {
       return;
     }
 
-    if (tl === "pencil") {
+    if (tl === "pencil" || tl === "highlighter") {
+      const hl = tl === "highlighter";
       dragRef.current = { mode: "pencil", sx: w.x, sy: w.y };
-      setDraft({ type: "pencil", x: w.x, y: w.y, points: [0, 0], size: 3, color: colorRef.current, z: 0 });
+      setDraft({ type: "pencil", x: w.x, y: w.y, points: [0, 0], size: (hl ? HL_SIZES : PEN_SIZES)[penSizeRef.current], color: colorRef.current, z: 0, ...(hl ? { hl: true } : {}) });
     }
   };
 
@@ -492,11 +570,19 @@ export default function Whiteboard() {
       return;
     }
     if (d.mode === "erase") {
-      const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest?.("[data-el]");
-      if (hit) removeElement(hit.getAttribute("data-el"));
+      eraseAt(d, document.elementFromPoint(e.clientX, e.clientY)?.closest?.("[data-el]"));
       return;
     }
     const w = toWorld(e.clientX, e.clientY);
+    if (d.mode === "lasso") {
+      setDraft(dr => {
+        if (!dr || dr.type !== "lasso") return dr;
+        const p = dr.pts;
+        if (Math.hypot(w.x - p[p.length - 2], w.y - p[p.length - 1]) < 3 / viewRef.current.z) return dr;
+        return { ...dr, pts: [...p, w.x, w.y] };
+      });
+      return;
+    }
     if (d.mode === "move") {
       const dx = w.x - d.wx, dy = w.y - d.wy;
       if (!d.moved && Math.hypot(dx, dy) < 2 / viewRef.current.z) return;
@@ -549,6 +635,20 @@ export default function Whiteboard() {
     dragRef.current = null;
     if (!d) return;
 
+    if (d.mode === "erase") { if (d.batch.length) record(d.batch); return; }
+    if (d.mode === "lasso") {
+      const dr = draftRef.current;
+      setDraft(null);
+      if (!dr || dr.type !== "lasso" || dr.pts.length < 6) return;
+      const ids = [];
+      for (const [id, el] of Object.entries(elementsRef.current)) {
+        const b = bounds(el);
+        if (pointInPoly(b.x + b.w / 2, b.y + b.h / 2, dr.pts)) ids.push(id);
+      }
+      setMulti(ids);
+      if (ids.length) setTool("select");
+      return;
+    }
     if (d.mode === "move") {
       if (!d.moved) return;
       const changes = [];
@@ -681,7 +781,7 @@ export default function Whiteboard() {
     display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0, opacity: disabled ? 0.5 : 1,
   });
   const small = (extra = {}) => ({ ...btn(false), width: 30, height: 30, fontSize: 14, ...extra });
-  const cursorStyle = tool === "select" ? "default" : tool === "hand" ? "grab" : tool === "eraser" ? "cell" : "crosshair";
+  const cursorStyle = tool === "select" ? "default" : tool === "hand" ? "grab" : (tool === "eraser" || tool === "eraserInk") ? "cell" : "crosshair";
   const gridSize = 28 * view.z;
   const isShape = SHAPES.some(s => s.id === tool), isConn = CONNECTORS.some(s => s.id === tool);
   const shapeIcon = SHAPES.find(s => s.id === picks.shape)?.icon, connIcon = CONNECTORS.find(s => s.id === picks.conn)?.icon;
@@ -747,7 +847,18 @@ export default function Whiteboard() {
           {sorted.map(([elId, el]) => (
             <ElementView key={elId} id={elId} el={el} editing={editing === elId} onCommit={commitText} />
           ))}
-          {draft && <ElementView id="__draft" el={draft} editing={false} onCommit={() => {}} />}
+          {draft && draft.type === "lasso" && (
+            <svg width="1" height="1" style={{ position: "absolute", left: 0, top: 0, overflow: "visible", pointerEvents: "none" }}>
+              <polygon points={draft.pts.join(" ").replace(/(\S+) (\S+)/g, "$1,$2")} fill={ACCENT + "22"} stroke={ACCENT} strokeWidth={1.5 / view.z} strokeDasharray={`${6 / view.z} ${4 / view.z}`} />
+            </svg>
+          )}
+          {draft && draft.type !== "lasso" && <ElementView id="__draft" el={draft} editing={false} onCommit={() => {}} />}
+          {multi.map(id => {
+            const el = elements[id];
+            if (!el) return null;
+            const b = bounds(el);
+            return <div key={"m" + id} style={{ position: "absolute", left: b.x - 3, top: b.y - 3, width: b.w + 6, height: b.h + 6, border: `${1.5 / view.z}px solid ${ACCENT}`, background: ACCENT + "14", pointerEvents: "none", boxSizing: "border-box", borderRadius: 4 }} />;
+          })}
 
           {selB && !draft && (
             <div style={{
@@ -787,7 +898,7 @@ export default function Whiteboard() {
           <button title="Texte (T)" onClick={() => chooseTool("text")} style={btn(tool === "text")}>T</button>
           {groupBtn("shapes", shapeIcon, "Formes", isShape)}
           {groupBtn("conn", connIcon, "Connecteurs", isConn)}
-          <button title="Crayon (P)" onClick={() => chooseTool("pencil")} style={btn(tool === "pencil")}>✏️</button>
+          {groupBtn("pen", picks.pen === "highlighter" ? "🖍️" : picks.pen === "lasso" ? "⭕" : picks.pen === "eraserInk" ? "🩹" : "✏️", "Crayon, surligneur, lasso…", PEN_TOOLS.includes(tool))}
           <button title="Cadre (F) — regroupe et déplace ce qu'il contient" onClick={() => chooseTool("frame")} style={btn(tool === "frame")}>⬚</button>
           <button title="Tableau (B)" onClick={() => chooseTool("table")} style={btn(tool === "table")}>▦</button>
           {groupBtn("charts", chartIcon, "Graphiques", tool === "chart")}
@@ -802,6 +913,21 @@ export default function Whiteboard() {
         {menu === "shapes" && (
           <div data-ui style={{ ...flyoutStyle, top: "30%", width: 140 }}>
             {SHAPES.map(s => <button key={s.id} title={s.label} onClick={() => chooseTool(s.id, "shape", s.id)} style={btn(tool === s.id)}>{s.icon}</button>)}
+          </div>
+        )}
+        {menu === "pen" && (
+          <div data-ui style={{ ...flyoutStyle, top: "34%", width: 150 }}>
+            <button title="Crayon (P)" onClick={() => chooseTool("pencil", "pen", "pencil")} style={btn(tool === "pencil")}>✏️</button>
+            <button title="Surligneur (I)" onClick={() => chooseTool("highlighter", "pen", "highlighter")} style={btn(tool === "highlighter")}>🖍️</button>
+            <button title="Gomme de traits (E) — efface l'élément touché" onClick={() => chooseTool("eraser", "pen", "eraser")} style={btn(tool === "eraser")}>🧽</button>
+            <button title="Gomme de dessin (X) — n'efface que les traits au crayon / surligneur" onClick={() => chooseTool("eraserInk", "pen", "eraserInk")} style={btn(tool === "eraserInk")}>🩹</button>
+            <button title="Lasso (Q) — entoure pour sélectionner plusieurs éléments" onClick={() => chooseTool("lasso", "pen", "lasso")} style={btn(tool === "lasso")}>⭕</button>
+            <div style={{ width: "100%", height: 1, background: "#2a2a44" }} />
+            {[0, 1, 2].map(i => (
+              <button key={i} title={["Fin", "Moyen", "Épais"][i]} onClick={() => setPenSize(i)} style={btn(penSize === i)}>
+                <span style={{ width: 6 + i * 6, height: 6 + i * 6, borderRadius: "50%", background: "#fff", display: "block" }} />
+              </button>
+            ))}
           </div>
         )}
         {menu === "conn" && (
@@ -830,7 +956,7 @@ export default function Whiteboard() {
             const current = (selEl && selEl.color) || color;
             return (
               <button key={c} title={c}
-                onClick={() => { setColor(c); if (selEl && selEl.type !== "emoji") patchSelected({ color: c }); }}
+                onClick={() => { setColor(c); if (multiRef.current.length) patchMulti({ color: c }); else if (selEl && selEl.type !== "emoji") patchSelected({ color: c }); }}
                 style={{
                   width: 24, height: 24, borderRadius: "50%", background: c, flexShrink: 0, cursor: "pointer", padding: 0,
                   border: current.toLowerCase() === c ? "3px solid #fff" : "2px solid #555",
@@ -838,6 +964,14 @@ export default function Whiteboard() {
                 }} />
             );
           })}
+          {multi.length > 0 && (
+            <>
+              <div style={{ width: 1, height: 26, background: "#2a2a44", margin: "0 4px", flexShrink: 0 }} />
+              <span style={{ fontSize: 12, color: "#aaa", whiteSpace: "nowrap" }}>{multi.length} élément{multi.length > 1 ? "s" : ""}</span>
+              <button style={small()} title="Dupliquer" onClick={duplicateMulti}>⧉</button>
+              <button style={small()} title="Supprimer (Suppr)" onClick={removeMulti}>🗑</button>
+            </>
+          )}
           {selEl && <div style={{ width: 1, height: 26, background: "#2a2a44", margin: "0 4px", flexShrink: 0 }} />}
           {hasSizeText && (
             <>
