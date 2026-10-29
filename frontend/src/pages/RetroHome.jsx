@@ -2,15 +2,10 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
 import { addLocalSession } from "../localHistory";
+import { RETRO_TEMPLATES, CUSTOM_TEMPLATE } from "../retroTemplates";
 import { useDocumentMeta } from "../useDocumentMeta";
 
-const TEMPLATES = [
-  { id: "ssc",  name: "Start · Stop · Continue", columns: ["Start", "Stop", "Continue"] },
-  { id: "gsm",  name: "Glad · Sad · Mad",        columns: ["😊 Glad", "😢 Sad", "😡 Mad"] },
-  { id: "4l",   name: "4L",                      columns: ["Liked", "Learned", "Lacked", "Longed for"] },
-  { id: "speedboat", name: "🚤 Speed Boat", columns: ["🏝️ Île (notre objectif)", "💨 Vent (ce qui nous propulse)", "⚓ Ancres (ce qui nous freine)", "🪨 Rochers (risques à venir)"] },
-  { id: "custom", name: "Personnalisé",          columns: ["", "", ""] },
-];
+const TEMPLATES = [...RETRO_TEMPLATES, CUSTOM_TEMPLATE];
 
 export default function RetroHome() {
   useDocumentMeta("Rétrospective d'équipe", "Organisez une rétrospective Agile en ligne : colonnes personnalisables, post-its anonymes, vote à points. Gratuit, sans compte.");
@@ -58,7 +53,7 @@ export default function RetroHome() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#0d0d1a", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px" }}>
-      <div style={{ width: "100%", maxWidth: 540, color: "#fff" }}>
+      <div style={{ width: "100%", maxWidth: 640, color: "#fff" }}>
 
         <a href="/" style={{ display: "inline-block", color: "#666", fontSize: 14, textDecoration: "none", marginBottom: 16 }}>
           ← Retour aux outils
@@ -82,24 +77,48 @@ export default function RetroHome() {
             onChange={e => setSessionName(e.target.value)}
             style={inputStyle} />
 
-          <label style={labelStyle}>Modèle de colonnes</label>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
-            {TEMPLATES.map(t => (
-              <button key={t.id} onClick={() => setTemplate(t.id)}
-                style={{
-                  padding: "9px 14px",
-                  background: template === t.id ? "#f15bb522" : "#1a1a2e",
-                  border: `1px solid ${template === t.id ? "#f15bb5" : "#444"}`,
-                  borderRadius: 999,
-                  color: template === t.id ? "#f15bb5" : "#aaa",
-                  fontSize: 13.5,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}>
-                {t.name}
-              </button>
-            ))}
-          </div>
+          <label style={labelStyle}>Modèle de rétro</label>
+          {[["classic", "Classiques"], ["fun", "Jeux & métaphores 🎲"]].map(([cat, title]) => (
+            <div key={cat} style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, color: "#666", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", margin: "0 0 8px" }}>{title}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 }}>
+                {TEMPLATES.filter(t => t.category === cat).map(t => (
+                  <button key={t.id} onClick={() => setTemplate(t.id)} title={t.desc}
+                    style={{
+                      textAlign: "left", padding: "10px 12px", display: "flex", gap: 8, alignItems: "center",
+                      background: template === t.id ? "#f15bb522" : "#1a1a2e",
+                      border: `1px solid ${template === t.id ? "#f15bb5" : "#333"}`,
+                      borderRadius: 10, color: template === t.id ? "#f15bb5" : "#bbb",
+                      fontSize: 13, fontWeight: 600, cursor: "pointer", lineHeight: 1.25,
+                    }}>
+                    <span style={{ fontSize: 20 }}>{t.icon}</span><span>{t.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          <button onClick={() => setTemplate("custom")}
+            style={{
+              padding: "9px 14px", marginBottom: 14, background: template === "custom" ? "#f15bb522" : "#1a1a2e",
+              border: `1px solid ${template === "custom" ? "#f15bb5" : "#333"}`, borderRadius: 10,
+              color: template === "custom" ? "#f15bb5" : "#bbb", fontSize: 13, fontWeight: 600, cursor: "pointer",
+            }}>
+            ✏️ Personnalisé
+          </button>
+
+          {template !== "custom" && (() => {
+            const t = TEMPLATES.find(x => x.id === template);
+            return t ? (
+              <div style={{ background: "#0d0d1a", border: "1px solid #222", borderRadius: 12, padding: "12px 14px", marginBottom: 20 }}>
+                <div style={{ fontSize: 14, color: "#ddd", marginBottom: 8 }}>{t.icon} {t.desc}</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {t.columns.map((c, i) => (
+                    <span key={i} style={{ fontSize: 12, color: "#f15bb5", border: "1px solid #f15bb544", borderRadius: 999, padding: "3px 10px" }}>{c}</span>
+                  ))}
+                </div>
+              </div>
+            ) : null;
+          })()}
 
           {template === "custom" && (
             <div style={{ marginBottom: 20 }}>
