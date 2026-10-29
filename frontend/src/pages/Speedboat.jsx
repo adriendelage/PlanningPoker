@@ -130,6 +130,99 @@ function Scene() {
   );
 }
 
+// ─── Export en image (PNG) ──────────────────────────────────────────────────
+// Le décor SVG est converti en image, puis les post-its sont dessinés par-dessus
+// directement sur le canvas (pas de bibliothèque, rien ne quitte le navigateur).
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function wrapLines(ctx, text, maxW) {
+  const lines = [];
+  for (const para of String(text || "").split("\n")) {
+    let line = "";
+    for (const word of para.split(/\s+/).filter(Boolean)) {
+      const test = line ? line + " " + word : word;
+      if (ctx.measureText(test).width <= maxW) { line = test; continue; }
+      if (line) lines.push(line);
+      line = "";
+      let chunk = "";                      // mot plus long que la ligne : on coupe
+      for (const ch of word) {
+        if (ctx.measureText(chunk + ch).width > maxW && chunk) { lines.push(chunk); chunk = ""; }
+        chunk += ch;
+      }
+      line = chunk;
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+
+async function exportPng(svgEl, noteList, title) {
+  const K = 2, HEADER = 56;                // résolution ×2, bandeau de titre
+  const clone = svgEl.cloneNode(true);
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  clone.setAttribute("width", W); clone.setAttribute("height", H);
+  clone.removeAttribute("style");
+  const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(clone));
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+
+  const canvas = document.createElement("canvas");
+  canvas.width = W * K; canvas.height = (H + HEADER) * K;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(K, K);
+  ctx.fillStyle = "#0d0d1a"; ctx.fillRect(0, 0, W, H + HEADER);
+
+  ctx.fillStyle = "#ffffff"; ctx.font = "700 24px system-ui, sans-serif"; ctx.textBaseline = "middle";
+  ctx.fillText("🚤 " + (title || "Speed Boat"), 18, HEADER / 2);
+  const date = new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+  ctx.fillStyle = "#8a8fa8"; ctx.font = "500 15px system-ui, sans-serif"; ctx.textAlign = "right";
+  ctx.fillText(date, W - 18, HEADER / 2); ctx.textAlign = "left";
+
+  ctx.drawImage(img, 0, HEADER, W, H);
+  ctx.translate(0, HEADER);
+
+  for (const [elId, n] of noteList) {
+    ctx.save();
+    ctx.translate(n.x + n.w / 2, n.y + n.h / 2);
+    ctx.rotate((tilt(elId) * Math.PI) / 180);
+    ctx.shadowColor = "rgba(0,0,0,.5)"; ctx.shadowBlur = 12; ctx.shadowOffsetY = 5;
+    ctx.fillStyle = n.color; roundRect(ctx, -n.w / 2, -n.h / 2, n.w, n.h, 4); ctx.fill();
+    ctx.shadowColor = "transparent";
+
+    const dark = darkNote(n.color);
+    const small = n.w < 90;
+    const padL = small ? 5 : 9, padT = small ? 4 : 9, padR = small ? 14 : 20;
+    const padB = small ? 4 : n.h < 60 ? 6 : 19;
+    ctx.save();
+    roundRect(ctx, -n.w / 2, -n.h / 2, n.w, n.h, 4); ctx.clip();
+    ctx.fillStyle = dark ? "#ffffff" : "#1a1a2e";
+    ctx.font = `${n.fs}px system-ui, sans-serif`; ctx.textBaseline = "top";
+    const lh = n.fs * 1.25, maxLines = Math.max(1, Math.floor((n.h - padT - padB) / lh));
+    wrapLines(ctx, n.text, n.w - padL - padR).slice(0, maxLines).forEach((ln, i) => {
+      ctx.fillText(ln, -n.w / 2 + padL, -n.h / 2 + padT + i * lh);
+    });
+    if (n.author && n.w >= 90 && n.h >= 60) {
+      ctx.globalAlpha = 0.5; ctx.font = "600 10px system-ui, sans-serif"; ctx.textBaseline = "alphabetic";
+      let a = n.author;
+      while (a.length > 1 && ctx.measureText(a).width > n.w - 31) a = a.slice(0, -1);
+      ctx.fillText(a, -n.w / 2 + 7, n.h / 2 - 6);
+    }
+    ctx.restore();
+    ctx.restore();
+  }
+
+  const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
+  if (!blob) throw new Error("export impossible");
+  return blob;
+}
+
 function NoteEditor({ initial, onDone }) {
   const ref = useRef(null);
   useEffect(() => {
@@ -384,6 +477,28 @@ export default function Speedboat() {
     return () => window.removeEventListener("keydown", key);
   }, [remove]);
 
+  const [exporting, setExporting] = useState(false);
+  const exportImage = async () => {
+    const svg = sceneRef.current && sceneRef.current.querySelector("svg");
+    if (!svg) return;
+    setExporting(true);
+    try {
+      setSelected(null);
+      const blob = await exportPng(svg, Object.entries(notesRef.current).sort((a, b) => (a[1].z || 0) - (b[1].z || 0)), name);
+      const slug = (name || "speedboat").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "speedboat";
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `speedboat-${slug}.png`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    } catch (err) {
+      console.error(err);
+      alert("L'export en image a échoué sur ce navigateur.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const copy = () => {
     navigator.clipboard.writeText(window.location.href);
     setCopied(true);
@@ -431,6 +546,10 @@ export default function Speedboat() {
             <button onClick={rename} title="Changer ton nom affiché"
               style={{ padding: "7px 12px", background: "#14142a", border: "1px solid #2a2a44", borderRadius: 8, color: "#aaa", fontSize: 13, cursor: "pointer" }}>
               👤 {myName || "Ton nom"}
+            </button>
+            <button onClick={exportImage} disabled={exporting} title="Télécharger le speedboat en image PNG"
+              style={{ padding: "7px 12px", background: "#14142a", border: "1px solid #2a2a44", borderRadius: 8, color: "#ddd", fontSize: 13, cursor: exporting ? "default" : "pointer", fontWeight: 600 }}>
+              {exporting ? "Export…" : "📷 Exporter en image"}
             </button>
             <button onClick={copy}
               style={{ padding: "7px 14px", background: copied ? "#00f5d4" : "#14142a", border: "1px solid #2a2a44", borderRadius: 8, color: copied ? "#0d0d1a" : "#aaa", fontSize: 13, cursor: "pointer", fontWeight: 600 }}>
