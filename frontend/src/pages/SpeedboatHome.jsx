@@ -13,6 +13,7 @@ export default function SpeedboatHome() {
   const create = () => {
     if (!hostName.trim()) return alert("Veuillez saisir votre nom");
     if (!name.trim()) return alert("Donne un nom à la rétrospective");
+    try { localStorage.setItem("sb_name", hostName.trim().slice(0, 30)); } catch { /* ignoré */ }
     socket.emit("whiteboard:create", { name, hostName, tool: "speedboat" }, (id) => {
       addLocalSession({ id, tool: "speedboat", name, role: "host" });
       nav("/speedboat/" + id);

@@ -493,6 +493,7 @@ function sanitizeWbElement(raw) {
     el.h = wbNum(raw.h, 20, 6000, 120);
     el.text = String(raw.text || "").slice(0, 2000);
     el.fs = wbNum(raw.fs, 8, 120, 16);
+    if (typeof raw.author === "string" && raw.author.trim()) el.author = raw.author.trim().slice(0, 30);
   }
   if (el.type === "arrow" || el.type === "pencil") {
     const pts = Array.isArray(raw.points) ? raw.points.slice(0, 4000) : [];

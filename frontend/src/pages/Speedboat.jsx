@@ -156,6 +156,10 @@ export default function Speedboat() {
   const [color, setColor] = useState(COLORS[0]);
   const [copied, setCopied] = useState(false);
   const [scale, setScale] = useState(1);
+  const [myName, setMyName] = useState(() => {
+    try { return localStorage.getItem("sb_name") || ""; } catch { return ""; }
+  });
+  const [nameDraft, setNameDraft] = useState("");
 
   useDocumentMeta(name ? `${name} — Speed Boat` : "Speed Boat", "Rétrospective Speed Boat collaborative.");
 
@@ -169,6 +173,17 @@ export default function Speedboat() {
   notesRef.current = notes;
   scaleRef.current = scale;
   selectedRef.current = selected;
+
+  const saveName = (v) => {
+    const n = v.trim().slice(0, 30);
+    if (!n) return;
+    setMyName(n);
+    try { localStorage.setItem("sb_name", n); } catch { /* ignoré */ }
+  };
+  const rename = () => {
+    const n = window.prompt("Ton nom affiché sur tes post-its :", myName);
+    if (n) saveName(n);
+  };
 
   const send = useCallback((elId, el) => socket.emit("whiteboard:upsert", { id, elId, el }), [id]);
 
@@ -233,7 +248,7 @@ export default function Speedboat() {
     const [bx, by, bw, bh] = zone.box;
     const nid = rid();
     const el = {
-      type: "sticky", color, text: "", fs: 15, w: NOTE_W, h: NOTE_H, z: nextZ(),
+      type: "sticky", color, text: "", author: myName, fs: 15, w: NOTE_W, h: NOTE_H, z: nextZ(),
       x: Math.round(bx + Math.random() * Math.max(0, bw - NOTE_W)),
       y: Math.round(by + 10 + Math.random() * Math.max(0, bh - NOTE_H - 10)),
     };
@@ -331,12 +346,6 @@ export default function Speedboat() {
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
-  const clearAll = () => {
-    if (!window.confirm("Effacer tous les post-its pour tout le monde ? Cette action est définitive.")) return;
-    setNotes({}); notesRef.current = {}; setSelected(null);
-    socket.emit("whiteboard:clear", { id });
-  };
-
   if (notFound) {
     return (
       <div style={{ minHeight: "100vh", background: "#0d0d1a", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", textAlign: "center", padding: 16 }}>
@@ -376,9 +385,9 @@ export default function Speedboat() {
           <a href="/" style={{ color: "#666", fontSize: 14, textDecoration: "none" }}>← Outils</a>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>🚤 {name || "Speed Boat"}</h1>
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-            <button onClick={clearAll}
-              style={{ padding: "7px 12px", background: "#14142a", border: "1px solid #2a2a44", borderRadius: 8, color: "#ff6b6b", fontSize: 13, cursor: "pointer" }}>
-              Tout effacer
+            <button onClick={rename} title="Changer ton nom affiché"
+              style={{ padding: "7px 12px", background: "#14142a", border: "1px solid #2a2a44", borderRadius: 8, color: "#aaa", fontSize: 13, cursor: "pointer" }}>
+              👤 {myName || "Ton nom"}
             </button>
             <button onClick={copy}
               style={{ padding: "7px 14px", background: copied ? "#00f5d4" : "#14142a", border: "1px solid #2a2a44", borderRadius: 8, color: copied ? "#0d0d1a" : "#aaa", fontSize: 13, cursor: "pointer", fontWeight: 600 }}>
@@ -432,7 +441,7 @@ export default function Speedboat() {
                   onDoubleClick={() => { setSelected(elId); setEditing(elId); }}
                   style={{
                     position: "absolute", left: n.x, top: n.y, width: n.w, height: n.h, boxSizing: "border-box",
-                    background: n.color, color: darkNote(n.color) ? "#fff" : "#1a1a2e", padding: "9px 20px 9px 9px", borderRadius: 4,
+                    background: n.color, color: darkNote(n.color) ? "#fff" : "#1a1a2e", padding: "9px 20px 19px 9px", borderRadius: 4,
                     fontSize: n.fs, lineHeight: 1.25, fontFamily: "system-ui, sans-serif",
                     boxShadow: selected === elId ? `0 0 0 3px ${ACCENT}, 0 8px 18px rgba(0,0,0,.55)` : "0 6px 12px rgba(0,0,0,.5)",
                     transform: `rotate(${tilt(elId)}deg)`, cursor: editing === elId ? "text" : "grab", userSelect: "none", touchAction: "none",
@@ -441,6 +450,13 @@ export default function Speedboat() {
                   <div style={{ width: "100%", height: "100%", overflow: "hidden", wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
                     {editing === elId ? <NoteEditor initial={n.text} onDone={v => commitText(elId, v)} /> : n.text}
                   </div>
+
+                  {n.author && (
+                    <div style={{
+                      position: "absolute", left: 7, bottom: 3, right: 24, fontSize: 10, lineHeight: "13px", opacity: .5,
+                      fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", pointerEvents: "none",
+                    }}>{n.author}</div>
+                  )}
 
                   {/* petite poubelle, coin haut droit */}
                   <button
@@ -478,6 +494,23 @@ export default function Speedboat() {
             )}
           </div>
         </div>
+
+        {!myName && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(5,5,15,.82)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <form onSubmit={e => { e.preventDefault(); saveName(nameDraft); }}
+              style={{ width: "100%", maxWidth: 380, background: "#111", border: "1px solid #2a2a44", borderRadius: 16, padding: "26px 24px", textAlign: "center" }}>
+              <div style={{ fontSize: 40 }}>🚤</div>
+              <h2 style={{ margin: "6px 0 4px", fontSize: 20 }}>Comment t'appelles-tu ?</h2>
+              <p style={{ margin: "0 0 16px", fontSize: 13.5, color: "#777" }}>Ton nom apparaîtra discrètement sur les post-its que tu poses.</p>
+              <input autoFocus value={nameDraft} onChange={e => setNameDraft(e.target.value)} maxLength={30} placeholder="Ex: Alice"
+                style={{ width: "100%", boxSizing: "border-box", padding: "13px 14px", marginBottom: 14, background: "#1a1a2e", border: "1px solid #444", borderRadius: 10, color: "#fff", fontSize: 16, outline: "none" }} />
+              <button type="submit"
+                style={{ width: "100%", padding: 14, background: ACCENT, border: "none", borderRadius: 10, fontWeight: "bold", cursor: "pointer", fontSize: 16, color: "#0d0d1a" }}>
+                Monter à bord →
+              </button>
+            </form>
+          </div>
+        )}
 
         <p style={{ margin: "12px 2px 0", fontSize: 13, color: "#666", lineHeight: 1.6 }}>
           Glisse un post-it pour le déplacer · tire le coin bas droit pour le redimensionner · double-clic pour modifier le texte ·
