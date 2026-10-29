@@ -470,7 +470,7 @@ function broadcastPulse(id) {
 let whiteboards = {};
 const wbTimers = {};
 const WB_MAX_ELEMENTS = 1500;
-const WB_BOX_TYPES = ["sticky", "text", "rect", "ellipse", "diamond", "triangle", "hexagon", "star", "frame", "table", "chart", "emoji"];
+const WB_BOX_TYPES = ["sticky", "text", "rect", "ellipse", "diamond", "triangle", "hexagon", "star", "shape", "frame", "table", "chart", "emoji"];
 const WB_LINE_TYPES = ["arrow", "line", "pencil"];
 const WB_CHART_KINDS = ["bar", "line", "pie", "donut"];
 const WB_TYPES = [...WB_BOX_TYPES, ...WB_LINE_TYPES];
@@ -496,6 +496,7 @@ function sanitizeWbElement(raw) {
     el.h = wbNum(raw.h, 20, 6000, 120);
     el.text = String(raw.text || "").slice(0, el.type === "table" || el.type === "chart" ? 4000 : 2000);
     el.fs = wbNum(raw.fs, 8, 200, 16);
+    if (el.type === "shape") el.shape = /^[A-Za-z0-9]{1,24}$/.test(raw.shape) ? raw.shape : "rounded";
     if (el.type === "chart") el.kind = WB_CHART_KINDS.includes(raw.kind) ? raw.kind : "bar";
     if (typeof raw.author === "string" && raw.author.trim()) el.author = raw.author.trim().slice(0, 30);
   }

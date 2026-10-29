@@ -4,6 +4,7 @@ import socket from "../socket";
 import { addLocalSession, getLocalSessions } from "../localHistory";
 import { useDocumentMeta } from "../useDocumentMeta";
 import { ElementView, BOX_TYPES, TEXT_BOX_TYPES, LINE_TYPES, bounds } from "../whiteboard/shapes";
+import { SHAPE_LIB, SHAPE_BY_ID, SHAPE_CATEGORIES, ShapeThumb } from "../whiteboard/shapeLib";
 import TemplatePicker from "../whiteboard/TemplatePicker";
 
 const ACCENT = "#4cc9f0";
@@ -46,10 +47,10 @@ const pointInPoly = (x, y, pts) => {
 const SAMPLE_CHART = "# Titre du graphique\nA: 12\nB: 19\nC: 8\nD: 15";
 const SAMPLE_TABLE = "Colonne A | Colonne B | Colonne C\n | | \n | | ";
 const DEFAULT_SIZE = {
-  rect: [160, 100], ellipse: [160, 100], diamond: [170, 120], triangle: [150, 130], hexagon: [170, 110], star: [140, 140],
+  rect: [160, 100], ellipse: [160, 100], diamond: [170, 120], triangle: [150, 130], hexagon: [170, 110], star: [140, 140], shape: [170, 120],
   frame: [420, 300], table: [420, 150], chart: [420, 280],
 };
-const DRAG_BOX_TYPES = ["rect", "ellipse", "diamond", "triangle", "hexagon", "star", "frame", "table", "chart"];
+const DRAG_BOX_TYPES = ["rect", "ellipse", "diamond", "triangle", "hexagon", "star", "shape", "frame", "table", "chart"];
 
 const rid = () => Math.random().toString(36).slice(2, 10).padEnd(8, "0");
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -70,8 +71,9 @@ export default function Whiteboard() {
   const [copied, setCopied] = useState(false);
   const [panning, setPanning] = useState(false);
   const [menu, setMenu] = useState(null);                    // groupe d'outils déplié
-  const [picks, setPicks] = useState({ pen: "pencil", shape: "rect", conn: "arrow", chart: "bar", emoji: "👍" });
+  const [picks, setPicks] = useState({ lib: "rounded", pen: "pencil", shape: "rect", conn: "arrow", chart: "bar", emoji: "👍" });
   const [picker, setPicker] = useState(false);
+  const [shapeQ, setShapeQ] = useState("");
   const [multi, setMulti] = useState([]);                    // sélection multiple (lasso)
   const [penSize, setPenSize] = useState(1);                 // index dans PEN_SIZES / HL_SIZES
   const [modal, setModal] = useState(null);                  // édition d'un tableau / graphique / cadre
@@ -407,6 +409,7 @@ export default function Whiteboard() {
     const p = picksRef.current;
     const el = { type, x, y, w, h, text: "", color: colorRef.current, fs: 16, z: type === "frame" ? backZ() : nextZ() };
     if (type === "frame") el.text = "Cadre";
+    if (type === "shape") el.shape = p.lib;
     if (type === "table") { el.text = SAMPLE_TABLE; el.fs = 15; }
     if (type === "chart") { el.text = SAMPLE_CHART; el.kind = p.chart; el.fs = 14; }
     return el;
@@ -783,8 +786,8 @@ export default function Whiteboard() {
   const small = (extra = {}) => ({ ...btn(false), width: 30, height: 30, fontSize: 14, ...extra });
   const cursorStyle = tool === "select" ? "default" : tool === "hand" ? "grab" : (tool === "eraser" || tool === "eraserInk") ? "cell" : "crosshair";
   const gridSize = 28 * view.z;
-  const isShape = SHAPES.some(s => s.id === tool), isConn = CONNECTORS.some(s => s.id === tool);
-  const shapeIcon = SHAPES.find(s => s.id === picks.shape)?.icon, connIcon = CONNECTORS.find(s => s.id === picks.conn)?.icon;
+  const isShape = SHAPES.some(s => s.id === tool) || tool === "shape", isConn = CONNECTORS.some(s => s.id === tool);
+  const shapeIcon = <ShapeThumb shape={picks.shape === "shape" ? picks.lib : picks.shape} size={20} />,  connIcon = CONNECTORS.find(s => s.id === picks.conn)?.icon;
   const chartIcon = CHARTS.find(s => s.id === picks.chart)?.icon;
   const hasSizeText = selEl && (TEXT_BOX_TYPES.includes(selEl.type) || selEl.type === "table" || selEl.type === "frame");
   const flyoutStyle = { position: "absolute", left: 62, display: "flex", flexWrap: "wrap", gap: 6, padding: 8, background: "#14142af2", border: "1px solid #2a2a44", borderRadius: 12, zIndex: 20 };
@@ -911,8 +914,32 @@ export default function Whiteboard() {
 
         {/* Menus déroulants des groupes d'outils */}
         {menu === "shapes" && (
-          <div data-ui style={{ ...flyoutStyle, top: "30%", width: 140 }}>
-            {SHAPES.map(s => <button key={s.id} title={s.label} onClick={() => chooseTool(s.id, "shape", s.id)} style={btn(tool === s.id)}>{s.icon}</button>)}
+          <div data-ui style={{ ...flyoutStyle, top: "6%", bottom: "6%", width: 330, flexDirection: "column", flexWrap: "nowrap", gap: 8, padding: 12 }}>
+            <input value={shapeQ} onChange={e => setShapeQ(e.target.value)} placeholder="Rechercher une forme…" autoComplete="off"
+              style={{ background: "#0d0d1a", border: "1px solid #2a2a44", borderRadius: 8, color: "#fff", padding: "8px 10px", fontSize: 13, outline: "none" }} />
+            <div style={{ overflowY: "auto", flex: 1, minHeight: 0, paddingRight: 4 }}>
+              {SHAPE_CATEGORIES.map(cat => {
+                const items = SHAPE_LIB.filter(s => s.cat === cat.id && (!shapeQ.trim() || s.label.toLowerCase().includes(shapeQ.trim().toLowerCase())));
+                if (!items.length) return null;
+                return (
+                  <div key={cat.id} style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#8a8aa8", margin: "2px 0 6px" }}>{cat.label}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6 }}>
+                      {items.map(s => {
+                        const active = s.legacy ? tool === s.id : tool === "shape" && picks.lib === s.id;
+                        return (
+                          <button key={s.id} title={s.label}
+                            onClick={() => { if (s.legacy) chooseTool(s.id, "shape", s.id); else { setPicks(p => ({ ...p, lib: s.id, shape: "shape" })); chooseTool("shape"); } }}
+                            style={{ ...btn(active), width: "100%", height: 42 }}>
+                            <ShapeThumb shape={s} size={26} />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
         {menu === "pen" && (

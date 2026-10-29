@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
+import { SHAPE_BY_ID } from "./shapeLib";
 
 // Types d'éléments du tableau blanc et leur rendu.
-export const TEXT_BOX_TYPES = ["sticky", "text", "rect", "ellipse", "diamond", "triangle", "hexagon", "star"];
+export const TEXT_BOX_TYPES = ["sticky", "text", "rect", "ellipse", "diamond", "triangle", "hexagon", "star", "shape"];
 export const BOX_TYPES = [...TEXT_BOX_TYPES, "frame", "table", "chart", "emoji"];
 export const LINE_TYPES = ["arrow", "line", "pencil"];
 export const CHART_COLORS = ["#4cc9f0", "#f15bb5", "#fee440", "#00f5d4", "#9b5de5", "#ff9f1c", "#8ac926", "#ff6b6b"];
@@ -236,6 +237,22 @@ export function ElementView({ el, id, editing, onCommit }) {
     return (
       <div data-el={id} style={{ ...common, width: el.w, height: el.h, overflow: "hidden", borderRadius: 8, border: `2px solid ${el.color}`, background: "#14142a", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <Table el={el} />
+      </div>
+    );
+  }
+
+  if (el.type === "shape") {
+    const sh = SHAPE_BY_ID[el.shape] || SHAPE_BY_ID.rounded;
+    return (
+      <div data-el={id} style={{ ...common, width: el.w, height: el.h, fontSize: el.fs, lineHeight: 1.25, color: "#fff", fontFamily: "system-ui, sans-serif", userSelect: "none" }}>
+        <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", inset: 0, overflow: "visible" }}>
+          <path d={sh.d} fill={sh.open ? "none" : el.color + "22"} fillRule={sh.evenodd ? "evenodd" : "nonzero"} stroke={el.color} strokeWidth="3" vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+          {sh.x && <path d={sh.x} fill="none" stroke={el.color} strokeWidth="3" vectorEffect="non-scaling-stroke" strokeLinecap="round" />}
+          {sh.open && <rect x="0" y="0" width="100" height="100" fill="transparent" />}
+        </svg>
+        <div style={{ position: "absolute", left: "16%", right: "16%", top: "14%", bottom: "14%", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", wordBreak: "break-word", whiteSpace: "pre-wrap", overflow: "hidden" }}>
+          {editing ? <TextEditor initial={el.text} align="center" onDone={v => onCommit(id, v)} /> : el.text}
+        </div>
       </div>
     );
   }
