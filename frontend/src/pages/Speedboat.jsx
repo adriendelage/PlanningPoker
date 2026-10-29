@@ -6,7 +6,14 @@ import { useDocumentMeta } from "../useDocumentMeta";
 
 const ACCENT = "#00bbf9";
 const W = 1000, H = 600;                 // espace de coordonnées de la scène
-const NOTE_W = 130, NOTE_H = 96;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const NOTE_W = 120, NOTE_H = 88;      // taille « M » par défaut
+const SIZES = [
+  { id: "S", label: "S", w: 84,  h: 60,  fs: 11 },
+  { id: "M", label: "M", w: 120, h: 88,  fs: 14 },
+  { id: "L", label: "L", w: 170, h: 124, fs: 19 },
+];
+const fsFor = (w, h) => clamp(Math.round(14 * Math.sqrt((w * h) / (NOTE_W * NOTE_H))), 7, 38);
 const COLORS = [
   "#fee440", "#ffd6a5", "#ff9f1c", "#ff6b6b", "#f15bb5", "#ffb3d9",
   "#c8a2ff", "#9b5de5", "#4cc9f0", "#00bbf9", "#00f5d4", "#8ac926",
@@ -23,7 +30,6 @@ const ZONES = [
 ];
 
 const rid = () => Math.random().toString(36).slice(2, 10).padEnd(8, "0");
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const tilt = (id) => ((id.charCodeAt(0) + id.charCodeAt(3)) % 5) - 2;   // -2° à +2°, stable
 
 // ─── Illustration : tout est dessiné en SVG, aucune image externe ────────────
@@ -154,6 +160,7 @@ export default function Speedboat() {
   const [selected, setSelected] = useState(null);
   const [editing, setEditing] = useState(null);
   const [color, setColor] = useState(COLORS[0]);
+  const [size, setSize] = useState("M");
   const [copied, setCopied] = useState(false);
   const [scale, setScale] = useState(1);
   const [myName, setMyName] = useState(() => {
@@ -246,10 +253,11 @@ export default function Speedboat() {
 
   const addNoteAt = (cx, cy) => {
     const nid = rid();
+    const sz = SIZES.find(z => z.id === size) || SIZES[1];
     const el = {
-      type: "sticky", color, text: "", author: myName, fs: 15, w: NOTE_W, h: NOTE_H, z: nextZ(),
-      x: clamp(Math.round(cx - NOTE_W / 2), 0, W - NOTE_W),
-      y: clamp(Math.round(cy - NOTE_H / 2), 0, H - NOTE_H),
+      type: "sticky", color, text: "", author: myName, fs: sz.fs, w: sz.w, h: sz.h, z: nextZ(),
+      x: clamp(Math.round(cx - sz.w / 2), 0, W - sz.w),
+      y: clamp(Math.round(cy - sz.h / 2), 0, H - sz.h),
     };
     put(nid, el);
     setSelected(nid); setEditing(nid);
@@ -270,6 +278,16 @@ export default function Speedboat() {
     if (!el) return;
     if (!text.trim()) return remove(elId);
     put(elId, { ...el, text: text.slice(0, 400) });
+  };
+
+  const applySize = (sz) => {
+    setSize(sz.id);
+    const el = notesRef.current[selectedRef.current];
+    if (!el) return;
+    put(selectedRef.current, {
+      ...el, w: sz.w, h: sz.h, fs: sz.fs,
+      x: clamp(el.x, 0, W - sz.w), y: clamp(el.y, 0, H - sz.h),
+    });
   };
 
   const setNoteColor = (c) => {
@@ -346,10 +364,10 @@ export default function Speedboat() {
     const el = notesRef.current[d.id];
     if (!el) return;
     const p = toScene(e);
-    const w = clamp(Math.round(d.ow + p.x - d.sx), 80, Math.min(420, W - el.x));
-    const h = clamp(Math.round(d.oh + p.y - d.sy), 60, Math.min(320, H - el.y));
+    const w = clamp(Math.round(d.ow + p.x - d.sx), 48, Math.min(420, W - el.x));
+    const h = clamp(Math.round(d.oh + p.y - d.sy), 34, Math.min(320, H - el.y));
     d.moved = true;
-    const fs = clamp(Math.round(15 * Math.sqrt((w * h) / (NOTE_W * NOTE_H))), 11, 38);
+    const fs = fsFor(w, h);
     const t = Date.now();
     const sync = t - lastSend.current > 60;
     if (sync) lastSend.current = t;
@@ -429,7 +447,20 @@ export default function Speedboat() {
               {z.icon} {z.label} <span style={{ opacity: .7, fontWeight: 500 }}>({count(z)})</span>
             </button>
           ))}
-          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 5, marginLeft: "auto", maxWidth: 420, justifyContent: "flex-end" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: "auto" }}>
+            <span style={{ fontSize: 12.5, color: "#777", marginRight: 2 }}>Taille :</span>
+            {SIZES.map(z => {
+              const cur = selNote ? (selNote.w === z.w && selNote.h === z.h) : size === z.id;
+              return (
+                <button key={z.id} onClick={() => applySize(z)} title={`Taille ${z.label}`}
+                  style={{ width: 28, height: 28, borderRadius: 7, cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 700,
+                    background: cur ? ACCENT + "33" : "#14142a", color: cur ? ACCENT : "#aaa", border: `1px solid ${cur ? ACCENT : "#2a2a44"}` }}>
+                  {z.label}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 5, maxWidth: 420, justifyContent: "flex-end" }}>
             <span style={{ fontSize: 12.5, color: "#777" }}>{selNote ? "Couleur du post-it" : "Couleur"} :</span>
             {COLORS.map(c => {
               const cur = (selNote ? selNote.color : color).toLowerCase() === c;
@@ -467,7 +498,7 @@ export default function Speedboat() {
                   onDoubleClick={() => { setSelected(elId); setEditing(elId); }}
                   style={{
                     position: "absolute", left: n.x, top: n.y, width: n.w, height: n.h, boxSizing: "border-box",
-                    background: n.color, color: darkNote(n.color) ? "#fff" : "#1a1a2e", padding: "9px 20px 19px 9px", borderRadius: 4,
+                    background: n.color, color: darkNote(n.color) ? "#fff" : "#1a1a2e", padding: n.w < 90 ? "4px 14px 4px 5px" : n.h < 60 ? "6px 22px 6px 8px" : "9px 20px 19px 9px", borderRadius: 4,
                     fontSize: n.fs, lineHeight: 1.25, fontFamily: "system-ui, sans-serif",
                     boxShadow: selected === elId ? `0 0 0 3px ${ACCENT}, 0 8px 18px rgba(0,0,0,.55)` : "0 6px 12px rgba(0,0,0,.5)",
                     transform: `rotate(${tilt(elId)}deg)`, cursor: editing === elId ? "text" : "grab", userSelect: "none", touchAction: "none",
@@ -477,7 +508,7 @@ export default function Speedboat() {
                     {editing === elId ? <NoteEditor initial={n.text} onDone={v => commitText(elId, v)} /> : n.text}
                   </div>
 
-                  {n.author && (
+                  {n.author && n.w >= 90 && n.h >= 60 && (
                     <div style={{
                       position: "absolute", left: 7, bottom: 3, right: 24, fontSize: 10, lineHeight: "13px", opacity: .5,
                       fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", pointerEvents: "none",
@@ -490,8 +521,8 @@ export default function Speedboat() {
                     onPointerDown={e => e.stopPropagation()}
                     onClick={e => { e.stopPropagation(); remove(elId); }}
                     style={{
-                      position: "absolute", top: 3, right: 3, width: 20, height: 20, padding: 0, border: "none", borderRadius: 4,
-                      background: "rgba(0,0,0,.18)", color: "inherit", fontSize: 12, lineHeight: "20px", cursor: "pointer",
+                      position: "absolute", top: 2, right: 2, width: n.w < 90 ? 14 : 20, height: n.w < 90 ? 14 : 20, padding: 0, border: "none", borderRadius: 4,
+                      background: "rgba(0,0,0,.18)", color: "inherit", fontSize: n.w < 90 ? 9 : 12, lineHeight: n.w < 90 ? "14px" : "20px", cursor: "pointer",
                       opacity: selected === elId ? 1 : .55,
                     }}
                   >🗑</button>
@@ -504,7 +535,7 @@ export default function Speedboat() {
                     onPointerUp={onNoteUp}
                     onPointerCancel={onNoteUp}
                     style={{
-                      position: "absolute", right: 0, bottom: 0, width: 18, height: 18, cursor: "nwse-resize", touchAction: "none",
+                      position: "absolute", right: 0, bottom: 0, width: n.w < 90 ? 14 : 18, height: n.w < 90 ? 14 : 18, cursor: "nwse-resize", touchAction: "none",
                       background: "linear-gradient(135deg, transparent 50%, rgba(0,0,0,.35) 50%)", borderBottomRightRadius: 4,
                       opacity: selected === elId ? 1 : .6,
                     }}
@@ -539,7 +570,7 @@ export default function Speedboat() {
         )}
 
         <p style={{ margin: "12px 2px 0", fontSize: 13, color: "#666", lineHeight: 1.6 }}>
-          Clique sur l'image pour poser un post-it · glisse-le pour le déplacer · tire le coin bas droit pour le redimensionner · double-clic pour modifier le texte ·
+          Clique sur l'image pour poser un post-it · glisse-le pour le déplacer · tire le coin bas droit (ou choisis S / M / L) pour le redimensionner · double-clic pour modifier le texte ·
           🗑 ou Suppr pour l'effacer · Entrée valide. Tout le monde voit les changements en direct.
         </p>
       </div>
