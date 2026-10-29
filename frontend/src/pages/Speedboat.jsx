@@ -7,7 +7,12 @@ import { useDocumentMeta } from "../useDocumentMeta";
 const ACCENT = "#00bbf9";
 const W = 1000, H = 600;                 // espace de coordonnées de la scène
 const NOTE_W = 130, NOTE_H = 96;
-const COLORS = ["#fee440", "#ff9f1c", "#f15bb5", "#00f5d4", "#4cc9f0", "#c8a2ff"];
+const COLORS = [
+  "#fee440", "#ffd6a5", "#ff9f1c", "#ff6b6b", "#f15bb5", "#ffb3d9",
+  "#c8a2ff", "#9b5de5", "#4cc9f0", "#00bbf9", "#00f5d4", "#8ac926",
+  "#caffbf", "#ffffff", "#b8c0cc", "#2b2d42",
+];
+const darkNote = (c) => c.toLowerCase() === "#2b2d42" || c.toLowerCase() === "#9b5de5";
 
 // Zones de la scène : où atterrit un nouveau post-it, et ce qu'elle représente
 const ZONES = [
@@ -267,7 +272,7 @@ export default function Speedboat() {
   };
   const onNoteMove = (e) => {
     const d = dragRef.current;
-    if (!d) return;
+    if (!d || d.mode === "resize") return;   // les mouvements de la poignée remontent jusqu'ici
     const el = notesRef.current[d.id];
     if (!el) return;
     const p = toScene(e);
@@ -284,6 +289,31 @@ export default function Speedboat() {
     const d = dragRef.current;
     dragRef.current = null;
     if (d && d.moved) { const el = notesRef.current[d.id]; if (el) send(d.id, el); }
+  };
+
+  // ─── Redimensionnement (poignée en bas à droite) ───────────────────────────
+  const onResizeDown = (e, elId) => {
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    const el = notesRef.current[elId];
+    const p = toScene(e);
+    setSelected(elId);
+    dragRef.current = { id: elId, mode: "resize", sx: p.x, sy: p.y, ow: el.w, oh: el.h, moved: false };
+  };
+  const onResizeMove = (e) => {
+    const d = dragRef.current;
+    if (!d || d.mode !== "resize") return;
+    const el = notesRef.current[d.id];
+    if (!el) return;
+    const p = toScene(e);
+    const w = clamp(Math.round(d.ow + p.x - d.sx), 80, Math.min(420, W - el.x));
+    const h = clamp(Math.round(d.oh + p.y - d.sy), 60, Math.min(320, H - el.y));
+    d.moved = true;
+    const fs = clamp(Math.round(15 * Math.sqrt((w * h) / (NOTE_W * NOTE_H))), 11, 38);
+    const t = Date.now();
+    const sync = t - lastSend.current > 60;
+    if (sync) lastSend.current = t;
+    put(d.id, { ...el, w, h, fs }, sync);
   };
 
   useEffect(() => {
@@ -365,13 +395,13 @@ export default function Speedboat() {
               {z.icon} {z.label} <span style={{ opacity: .7, fontWeight: 500 }}>({count(z)})</span>
             </button>
           ))}
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 5, marginLeft: "auto", maxWidth: 420, justifyContent: "flex-end" }}>
             <span style={{ fontSize: 12.5, color: "#777" }}>{selNote ? "Couleur du post-it" : "Couleur"} :</span>
             {COLORS.map(c => {
               const cur = (selNote ? selNote.color : color).toLowerCase() === c;
               return (
                 <button key={c} onClick={() => setNoteColor(c)} title={c}
-                  style={{ width: 24, height: 24, borderRadius: "50%", background: c, cursor: "pointer", padding: 0, border: cur ? "3px solid #fff" : "2px solid #0d0d1a", boxShadow: cur ? `0 0 0 1px ${ACCENT}` : "none" }} />
+                  style={{ width: 22, height: 22, borderRadius: "50%", background: c, cursor: "pointer", padding: 0, border: cur ? "3px solid #fff" : "2px solid #555", boxShadow: cur ? `0 0 0 1px ${ACCENT}` : "none" }} />
               );
             })}
             {selNote && (
@@ -402,13 +432,41 @@ export default function Speedboat() {
                   onDoubleClick={() => { setSelected(elId); setEditing(elId); }}
                   style={{
                     position: "absolute", left: n.x, top: n.y, width: n.w, height: n.h, boxSizing: "border-box",
-                    background: n.color, color: "#1a1a2e", padding: 9, borderRadius: 4, fontSize: n.fs, lineHeight: 1.25,
-                    fontFamily: "system-ui, sans-serif", overflow: "hidden", wordBreak: "break-word", whiteSpace: "pre-wrap",
+                    background: n.color, color: darkNote(n.color) ? "#fff" : "#1a1a2e", padding: "9px 20px 9px 9px", borderRadius: 4,
+                    fontSize: n.fs, lineHeight: 1.25, fontFamily: "system-ui, sans-serif",
                     boxShadow: selected === elId ? `0 0 0 3px ${ACCENT}, 0 8px 18px rgba(0,0,0,.55)` : "0 6px 12px rgba(0,0,0,.5)",
                     transform: `rotate(${tilt(elId)}deg)`, cursor: editing === elId ? "text" : "grab", userSelect: "none", touchAction: "none",
                   }}
                 >
-                  {editing === elId ? <NoteEditor initial={n.text} onDone={v => commitText(elId, v)} /> : n.text}
+                  <div style={{ width: "100%", height: "100%", overflow: "hidden", wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
+                    {editing === elId ? <NoteEditor initial={n.text} onDone={v => commitText(elId, v)} /> : n.text}
+                  </div>
+
+                  {/* petite poubelle, coin haut droit */}
+                  <button
+                    title="Supprimer ce post-it"
+                    onPointerDown={e => e.stopPropagation()}
+                    onClick={e => { e.stopPropagation(); remove(elId); }}
+                    style={{
+                      position: "absolute", top: 3, right: 3, width: 20, height: 20, padding: 0, border: "none", borderRadius: 4,
+                      background: "rgba(0,0,0,.18)", color: "inherit", fontSize: 12, lineHeight: "20px", cursor: "pointer",
+                      opacity: selected === elId ? 1 : .55,
+                    }}
+                  >🗑</button>
+
+                  {/* poignée de redimensionnement, coin bas droit */}
+                  <div
+                    title="Redimensionner"
+                    onPointerDown={e => onResizeDown(e, elId)}
+                    onPointerMove={onResizeMove}
+                    onPointerUp={onNoteUp}
+                    onPointerCancel={onNoteUp}
+                    style={{
+                      position: "absolute", right: 0, bottom: 0, width: 18, height: 18, cursor: "nwse-resize", touchAction: "none",
+                      background: "linear-gradient(135deg, transparent 50%, rgba(0,0,0,.35) 50%)", borderBottomRightRadius: 4,
+                      opacity: selected === elId ? 1 : .6,
+                    }}
+                  />
                 </div>
               ))}
             </div>
@@ -422,8 +480,8 @@ export default function Speedboat() {
         </div>
 
         <p style={{ margin: "12px 2px 0", fontSize: 13, color: "#666", lineHeight: 1.6 }}>
-          Glisse un post-it pour le déplacer · double-clic pour modifier le texte · Suppr pour l'effacer ·
-          Entrée valide. Tout le monde voit les changements en direct.
+          Glisse un post-it pour le déplacer · tire le coin bas droit pour le redimensionner · double-clic pour modifier le texte ·
+          🗑 ou Suppr pour l'effacer · Entrée valide. Tout le monde voit les changements en direct.
         </p>
       </div>
     </div>
