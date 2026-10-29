@@ -239,7 +239,7 @@ function NoteEditor({ initial, onDone }) {
         if (e.key === "Escape" || (e.key === "Enter" && !e.shiftKey)) { e.preventDefault(); e.target.blur(); }
         e.stopPropagation();
       }}
-      style={{ width: "100%", height: "100%", background: "transparent", border: "none", outline: "none", resize: "none", color: "inherit", font: "inherit", padding: 0 }}
+      style={{ width: "100%", height: "100%", background: "transparent", border: "none", outline: "none", resize: "none", color: "inherit", font: "inherit", padding: 0, userSelect: "text", WebkitUserSelect: "text" }}
     />
   );
 }
@@ -536,7 +536,7 @@ export default function Speedboat() {
   });
 
   return (
-    <div style={{ minHeight: "100vh", background: "#0d0d1a", color: "#fff", padding: "18px 16px 40px" }}>
+    <div style={{ minHeight: "100vh", background: "#0d0d1a", color: "#fff", padding: "18px 16px 40px", userSelect: "none", WebkitUserSelect: "none" }}>
       <div style={{ maxWidth: 1500, margin: "0 auto" }}>
 
         <header style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: 14 }}>

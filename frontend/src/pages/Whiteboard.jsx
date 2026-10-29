@@ -54,7 +54,7 @@ function TextEditor({ initial, align, onDone }) {
       }}
       style={{
         width: "100%", height: "100%", background: "transparent", border: "none", outline: "none",
-        resize: "none", color: "inherit", font: "inherit", textAlign: align, padding: 0,
+        resize: "none", color: "inherit", font: "inherit", textAlign: align, padding: 0, userSelect: "text", WebkitUserSelect: "text",
       }}
     />
   );
@@ -124,6 +124,7 @@ export default function Whiteboard() {
   const [draft, setDraft] = useState(null);
   const [cursors, setCursors] = useState({});
   const [copied, setCopied] = useState(false);
+  const [panning, setPanning] = useState(false);
   const [myName, setMyName] = useState(() => {
     try { return localStorage.getItem("wb_name") || "Invité " + Math.floor(10 + Math.random() * 90); } catch { return "Invité"; }
   });
@@ -332,6 +333,7 @@ export default function Whiteboard() {
 
     if (e.button === 1 || spaceRef.current || tl === "hand") {
       dragRef.current = { mode: "pan", sx: e.clientX, sy: e.clientY, view: { ...viewRef.current } };
+      setPanning(true);
       return;
     }
 
@@ -351,6 +353,7 @@ export default function Whiteboard() {
       }
       setSelected(null);
       dragRef.current = { mode: "pan", sx: e.clientX, sy: e.clientY, view: { ...viewRef.current } };
+      setPanning(true);
       return;
     }
 
@@ -462,6 +465,7 @@ export default function Whiteboard() {
   };
 
   const onPointerUp = (e) => {
+    setPanning(false);
     pointers.current.delete(e.pointerId);
     const d = dragRef.current;
     if (d && d.mode === "pinch") {
@@ -568,7 +572,7 @@ export default function Whiteboard() {
   const gridSize = 28 * view.z;
 
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0d0d1a", color: "#fff", overflow: "hidden" }}>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0d0d1a", color: "#fff", overflow: "hidden", userSelect: "none", WebkitUserSelect: "none" }}>
 
       <header data-ui style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: "8px 14px", borderBottom: "1px solid #1c1c30", background: "#101022" }}>
         <a href="/" style={{ color: "#666", fontSize: 14, textDecoration: "none" }}>← Outils</a>
@@ -600,15 +604,17 @@ export default function Whiteboard() {
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         onDoubleClick={onDoubleClick}
+        onSelectStart={e => e.preventDefault()}
+        onDragStart={e => e.preventDefault()}
         style={{
-          flex: 1, position: "relative", overflow: "hidden", touchAction: "none", cursor: cursorStyle,
+          flex: 1, position: "relative", overflow: "hidden", touchAction: "none", cursor: panning ? "grabbing" : cursorStyle,
           backgroundColor: "#0d0d1a",
           backgroundImage: "radial-gradient(#2a2a44 1.2px, transparent 1.2px)",
           backgroundSize: `${gridSize}px ${gridSize}px`,
           backgroundPosition: `${view.x}px ${view.y}px`,
         }}
       >
-        <div style={{ position: "absolute", left: 0, top: 0, transformOrigin: "0 0", transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }}>
+        <div style={{ position: "absolute", left: 0, top: 0, transformOrigin: "0 0", transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, pointerEvents: panning ? "none" : "auto" }}>
           {sorted.map(([elId, el]) => (
             <ElementView key={elId} id={elId} el={el} editing={editing === elId} onCommit={commitText} />
           ))}
