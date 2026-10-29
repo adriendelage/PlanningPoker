@@ -8,6 +8,7 @@ const TEMPLATES = [
   { id: "ssc",  name: "Start · Stop · Continue", columns: ["Start", "Stop", "Continue"] },
   { id: "gsm",  name: "Glad · Sad · Mad",        columns: ["😊 Glad", "😢 Sad", "😡 Mad"] },
   { id: "4l",   name: "4L",                      columns: ["Liked", "Learned", "Lacked", "Longed for"] },
+  { id: "speedboat", name: "🚤 Speed Boat", columns: ["🏝️ Île (notre objectif)", "💨 Vent (ce qui nous propulse)", "⚓ Ancres (ce qui nous freine)", "🪨 Rochers (risques à venir)"] },
   { id: "custom", name: "Personnalisé",          columns: ["", "", ""] },
 ];
 

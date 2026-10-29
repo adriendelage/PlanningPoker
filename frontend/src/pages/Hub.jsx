@@ -21,7 +21,7 @@ const TOOLS = [
     icon: "🔄",
     suit: "♥",
     name: "Rétrospective",
-    desc: "Colonnes personnalisables (Start / Stop / Continue…), post-its anonymes et dot-voting.",
+    desc: "Colonnes personnalisables (Start-Stop-Continue, Speed Boat, 4L…), post-its anonymes et dot-voting.",
     accent: "#f15bb5",
     path: "/retro",
     active: true,
