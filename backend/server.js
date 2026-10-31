@@ -506,6 +506,12 @@ function sanitizeWbElement(raw) {
     if (el.points.length % 2 === 1) el.points.pop();
     if (el.points.length < 4) return null;
     el.size = wbNum(raw.size, 1, 40, 3);
+    if (el.type !== "pencil") {
+      if (typeof raw.a === "string" && /^[A-Za-z0-9]{1,16}$/.test(raw.a)) el.a = raw.a;
+      if (typeof raw.b === "string" && /^[A-Za-z0-9]{1,16}$/.test(raw.b)) el.b = raw.b;
+      if (raw.style === "elbow") el.style = "elbow";
+      if (raw.ends === "both") el.ends = "both";
+    }
     if (raw.hl === true && el.type === "pencil") el.hl = true;
   }
   return el;

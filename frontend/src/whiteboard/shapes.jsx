@@ -18,6 +18,33 @@ export function bounds(el) {
   return { x: el.x + minX, y: el.y + minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
 }
 
+// Connecteurs « collants » : une flèche peut être accrochée à des éléments (a = départ, b = arrivée).
+// Les extrémités sont recalculées à l'affichage, donc elles suivent les formes quand on les déplace.
+function anchorOn(r, tx, ty, elbow) {
+  const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+  const dx = tx - cx, dy = ty - cy;
+  if (!dx && !dy) return { x: cx, y: cy };
+  if (elbow) {
+    if (Math.abs(dx) / (r.w / 2) > Math.abs(dy) / (r.h / 2)) return { x: cx + Math.sign(dx) * r.w / 2, y: cy };
+    return { x: cx, y: cy + Math.sign(dy) * r.h / 2 };
+  }
+  const k = Math.min((r.w / 2) / (Math.abs(dx) || 1e-9), (r.h / 2) / (Math.abs(dy) || 1e-9));
+  return { x: cx + dx * k, y: cy + dy * k };
+}
+export function resolveConn(el, all) {
+  if (!el || (el.type !== "arrow" && el.type !== "line") || (!el.a && !el.b) || !el.points || el.points.length < 4) return el;
+  const get = (id) => (id && all[id] && BOX_TYPES.includes(all[id].type) ? bounds(all[id]) : null);
+  const A = get(el.a), B = get(el.b);
+  if (!A && !B) return el;
+  const p = el.points;
+  const p0 = { x: el.x + p[0], y: el.y + p[1] }, p1 = { x: el.x + p[2], y: el.y + p[3] };
+  const elbow = el.style === "elbow";
+  const cA = A && { x: A.x + A.w / 2, y: A.y + A.h / 2 }, cB = B && { x: B.x + B.w / 2, y: B.y + B.h / 2 };
+  const s = A ? anchorOn(A, (B ? cB : p1).x, (B ? cB : p1).y, elbow) : p0;
+  const t = B ? anchorOn(B, (A ? cA : p0).x, (A ? cA : p0).y, elbow) : p1;
+  return { ...el, x: s.x, y: s.y, points: [0, 0, t.x - s.x, t.y - s.y] };
+}
+
 // Zone de saisie : le focus est pris juste après le montage, sinon le clic
 // qui vient de créer l'élément le lui reprend.
 export function TextEditor({ initial, align, onDone }) {
@@ -189,12 +216,27 @@ export function ElementView({ el, id, editing, onCommit }) {
       d = "M" + p[0] + " " + p[1];
       for (let i = 2; i + 1 < p.length; i += 2) d += " L" + p[i] + " " + p[i + 1];
     } else {
-      d = `M${p[0]} ${p[1]} L${p[2]} ${p[3]}`;
+      let angEnd = Math.atan2(p[3] - p[1], p[2] - p[0]), angStart = angEnd + Math.PI;
+      if (el.style === "elbow") {
+        const dx = p[2] - p[0], dy = p[3] - p[1];
+        if (Math.abs(dx) >= Math.abs(dy)) {
+          const mx = p[0] + dx / 2;
+          d = `M${p[0]} ${p[1]} L${mx} ${p[1]} L${mx} ${p[3]} L${p[2]} ${p[3]}`;
+          angEnd = dx >= 0 ? 0 : Math.PI; angStart = dx >= 0 ? Math.PI : 0;
+        } else {
+          const my = p[1] + dy / 2;
+          d = `M${p[0]} ${p[1]} L${p[0]} ${my} L${p[2]} ${my} L${p[2]} ${p[3]}`;
+          angEnd = dy >= 0 ? Math.PI / 2 : -Math.PI / 2; angStart = angEnd + Math.PI;
+        }
+      } else d = `M${p[0]} ${p[1]} L${p[2]} ${p[3]}`;
       if (el.type === "arrow") {
-        const ang = Math.atan2(p[3] - p[1], p[2] - p[0]);
         const L = 12 + el.size * 2;
-        const a1 = ang + Math.PI * 0.85, a2 = ang - Math.PI * 0.85;
-        head = `${p[2]},${p[3]} ${p[2] + Math.cos(a1) * L},${p[3] + Math.sin(a1) * L} ${p[2] + Math.cos(a2) * L},${p[3] + Math.sin(a2) * L}`;
+        const mk = (tx, ty, ang) => {
+          const a1 = ang + Math.PI * 0.85, a2 = ang - Math.PI * 0.85;
+          return `${tx},${ty} ${tx + Math.cos(a1) * L},${ty + Math.sin(a1) * L} ${tx + Math.cos(a2) * L},${ty + Math.sin(a2) * L}`;
+        };
+        head = [mk(p[2], p[3], angEnd)];
+        if (el.ends === "both") head.push(mk(p[0], p[1], angStart));
       }
     }
     return (
@@ -202,7 +244,7 @@ export function ElementView({ el, id, editing, onCommit }) {
         <g data-el={id}>
           <path d={d} fill="none" stroke="transparent" strokeWidth={Math.max(el.size, 16)} style={{ pointerEvents: "stroke" }} />
           <path d={d} fill="none" stroke={el.color} strokeWidth={el.size} strokeLinecap="round" strokeLinejoin="round" strokeOpacity={el.hl ? 0.4 : 1} style={{ pointerEvents: "none" }} />
-          {head && <polygon points={head} fill={el.color} style={{ pointerEvents: "none" }} />}
+          {head && head.map((h, i) => <polygon key={i} points={h} fill={el.color} style={{ pointerEvents: "none" }} />)}
         </g>
       </svg>
     );

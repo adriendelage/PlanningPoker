@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import socket from "../socket";
 import { addLocalSession, getLocalSessions } from "../localHistory";
 import { useDocumentMeta } from "../useDocumentMeta";
-import { ElementView, BOX_TYPES, TEXT_BOX_TYPES, LINE_TYPES, bounds } from "../whiteboard/shapes";
+import { ElementView, BOX_TYPES, TEXT_BOX_TYPES, LINE_TYPES, bounds, resolveConn } from "../whiteboard/shapes";
 import { SHAPE_LIB, SHAPE_BY_ID, SHAPE_CATEGORIES, ShapeThumb } from "../whiteboard/shapeLib";
 import TemplatePicker from "../whiteboard/TemplatePicker";
 
@@ -22,7 +22,10 @@ const SHAPES = [
 const CONNECTORS = [
   { id: "arrow", icon: "➜", label: "Flèche (A)" },
   { id: "line", icon: "╱", label: "Ligne (L)" },
+  { id: "elbow", icon: "⤷", label: "Connecteur coudé" },
+  { id: "darrow", icon: "⇄", label: "Flèche à double sens" },
 ];
+const CONN_STYLE = { arrow: {}, line: {}, elbow: { style: "elbow" }, darrow: { ends: "both" } };
 const CHARTS = [
   { id: "bar", icon: "📊", label: "Histogramme" },
   { id: "line", icon: "📈", label: "Courbe" },
@@ -74,6 +77,7 @@ export default function Whiteboard() {
   const [picks, setPicks] = useState({ lib: "rounded", pen: "pencil", shape: "rect", conn: "arrow", chart: "bar", emoji: "👍" });
   const [picker, setPicker] = useState(false);
   const [shapeQ, setShapeQ] = useState("");
+  const [hoverId, setHoverId] = useState(null);
   const [multi, setMulti] = useState([]);                    // sélection multiple (lasso)
   const [penSize, setPenSize] = useState(1);                 // index dans PEN_SIZES / HL_SIZES
   const [modal, setModal] = useState(null);                  // édition d'un tableau / graphique / cadre
@@ -295,6 +299,36 @@ export default function Whiteboard() {
     }
     record(changes);
   };
+  const alignMulti = (kind) => {
+    const items = multiRef.current.map(id => [id, elementsRef.current[id]]).filter(([, el]) => el && BOX_TYPES.includes(el.type));
+    if (items.length < 2) return;
+    const bs = items.map(([, el]) => bounds(el));
+    const minX = Math.min(...bs.map(b => b.x)), maxX = Math.max(...bs.map(b => b.x + b.w));
+    const minY = Math.min(...bs.map(b => b.y)), maxY = Math.max(...bs.map(b => b.y + b.h));
+    const pos = items.map(() => ({}));
+    if (kind === "left") bs.forEach((b, i) => pos[i].x = minX);
+    if (kind === "right") bs.forEach((b, i) => pos[i].x = maxX - b.w);
+    if (kind === "cx") bs.forEach((b, i) => pos[i].x = (minX + maxX) / 2 - b.w / 2);
+    if (kind === "top") bs.forEach((b, i) => pos[i].y = minY);
+    if (kind === "bottom") bs.forEach((b, i) => pos[i].y = maxY - b.h);
+    if (kind === "cy") bs.forEach((b, i) => pos[i].y = (minY + maxY) / 2 - b.h / 2);
+    if ((kind === "dx" || kind === "dy") && items.length > 2) {
+      const horiz = kind === "dx";
+      const order = bs.map((b, i) => i).sort((i, j) => (horiz ? bs[i].x - bs[j].x : bs[i].y - bs[j].y));
+      const total = horiz ? maxX - minX : maxY - minY;
+      const sum = bs.reduce((t, b) => t + (horiz ? b.w : b.h), 0);
+      const gap = (total - sum) / (items.length - 1);
+      let cur = horiz ? minX : minY;
+      for (const i of order) { pos[i][horiz ? "x" : "y"] = cur; cur += (horiz ? bs[i].w : bs[i].h) + gap; }
+    }
+    const changes = [];
+    items.forEach(([id, el], i) => {
+      const next = { ...el, ...Object.fromEntries(Object.entries(pos[i]).map(([k, v]) => [k, Math.round(v)])) };
+      putElement(id, next);
+      changes.push({ id, before: el, after: next });
+    });
+    record(changes);
+  };
   const duplicateMulti = () => {
     const nids = [], changes = [];
     for (const id of multiRef.current) {
@@ -415,6 +449,16 @@ export default function Whiteboard() {
     return el;
   };
 
+  const targetAt = (cx, cy) => {
+    for (const n of document.elementsFromPoint(cx, cy)) {
+      const hit = n.closest?.("[data-el]");
+      const id = hit && hit.getAttribute("data-el");
+      const el = id && elementsRef.current[id];
+      if (el && BOX_TYPES.includes(el.type)) return id;
+    }
+    return null;
+  };
+
   // Gomme : un geste = une seule entrée d'historique
   const eraseAt = (d, hit) => {
     if (!hit) return;
@@ -460,6 +504,20 @@ export default function Whiteboard() {
         dragRef.current = { mode: "resize", id: selectedRef.current, wx: w.x, wy: w.y, ow: el.w, oh: el.h, before: { ...el } };
         return;
       }
+      if (hitEl && e.shiftKey) {                     // Maj+clic : ajoute / retire de la sélection multiple
+        const hid = hitEl.getAttribute("data-el");
+        const set = new Set(multiRef.current);
+        if (selectedRef.current) set.add(selectedRef.current);
+        set.has(hid) ? set.delete(hid) : set.add(hid);
+        setSelected(null); setMulti([...set]);
+        return;
+      }
+      if (!hitEl && e.shiftKey) {                    // Maj+glisser : rectangle de sélection
+        setSelected(null); setMulti([]);
+        dragRef.current = { mode: "marquee", sx: w.x, sy: w.y };
+        setDraft({ type: "marquee", x: w.x, y: w.y, w: 0, h: 0 });
+        return;
+      }
       if (hitEl && multiRef.current.includes(hitEl.getAttribute("data-el"))) {   // déplacement du groupe sélectionné au lasso
         const group = {};
         for (const mid of multiRef.current) if (elementsRef.current[mid]) group[mid] = { ...elementsRef.current[mid] };
@@ -472,7 +530,7 @@ export default function Whiteboard() {
         const el = elementsRef.current[elId];
         if (!el) return;
         setSelected(elId);
-        const group = { [elId]: { ...el } };
+        const group = { [elId]: (el.a || el.b) ? { ...resolveConn(el, elementsRef.current), a: undefined, b: undefined } : { ...el } };
         if (el.type === "frame") {          // déplacer un cadre emporte ce qu'il contient
           for (const [cid, c] of Object.entries(elementsRef.current)) {
             if (cid === elId || c.type === "frame") continue;
@@ -526,9 +584,11 @@ export default function Whiteboard() {
       return;
     }
 
-    if (tl === "arrow" || tl === "line") {
-      dragRef.current = { mode: "draw", type: tl, sx: w.x, sy: w.y };
-      setDraft({ type: tl, x: w.x, y: w.y, points: [0, 0, 0, 0], size: 3, color: colorRef.current, z: 0 });
+    if (tl === "arrow" || tl === "line" || tl === "elbow" || tl === "darrow") {
+      const etype = tl === "line" ? "line" : "arrow";
+      const a = targetAt(e.clientX, e.clientY);
+      dragRef.current = { mode: "draw", type: etype, sx: w.x, sy: w.y };
+      setDraft({ type: etype, ...CONN_STYLE[tl], ...(a ? { a } : {}), x: w.x, y: w.y, points: [0, 0, 0, 0], size: 3, color: colorRef.current, z: 0 });
       return;
     }
 
@@ -577,6 +637,10 @@ export default function Whiteboard() {
       return;
     }
     const w = toWorld(e.clientX, e.clientY);
+    if (d.mode === "marquee") {
+      setDraft({ type: "marquee", x: Math.min(d.sx, w.x), y: Math.min(d.sy, w.y), w: Math.abs(w.x - d.sx), h: Math.abs(w.y - d.sy) });
+      return;
+    }
     if (d.mode === "lasso") {
       setDraft(dr => {
         if (!dr || dr.type !== "lasso") return dr;
@@ -608,7 +672,11 @@ export default function Whiteboard() {
       return;
     }
     if (d.mode === "draw") {
-      if (d.type === "arrow" || d.type === "line") setDraft(dr => dr && ({ ...dr, points: [0, 0, w.x - d.sx, w.y - d.sy] }));
+      if (d.type === "arrow" || d.type === "line") {
+        const hv = targetAt(e.clientX, e.clientY);
+        setHoverId(hv);
+        setDraft(dr => dr && ({ ...dr, points: [0, 0, w.x - d.sx, w.y - d.sy], ...(hv ? { b: hv } : { b: undefined }) }));
+      }
       else setDraft(dr => dr && ({
         ...dr, x: Math.min(d.sx, w.x), y: Math.min(d.sy, w.y),
         w: Math.max(1, Math.abs(w.x - d.sx)), h: Math.max(1, Math.abs(w.y - d.sy)),
@@ -639,13 +707,25 @@ export default function Whiteboard() {
     if (!d) return;
 
     if (d.mode === "erase") { if (d.batch.length) record(d.batch); return; }
+    if (d.mode === "marquee") {
+      const dr = draftRef.current;
+      setDraft(null);
+      if (!dr || dr.type !== "marquee") return;
+      const ids = [];
+      for (const [id, raw] of Object.entries(elementsRef.current)) {
+        const b = bounds(resolveConn(raw, elementsRef.current));
+        if (b.x < dr.x + dr.w && b.x + b.w > dr.x && b.y < dr.y + dr.h && b.y + b.h > dr.y) ids.push(id);
+      }
+      setMulti(ids);
+      return;
+    }
     if (d.mode === "lasso") {
       const dr = draftRef.current;
       setDraft(null);
       if (!dr || dr.type !== "lasso" || dr.pts.length < 6) return;
       const ids = [];
       for (const [id, el] of Object.entries(elementsRef.current)) {
-        const b = bounds(el);
+        const b = bounds(resolveConn(el, elementsRef.current));
         if (pointInPoly(b.x + b.w / 2, b.y + b.h / 2, dr.pts)) ids.push(id);
       }
       setMulti(ids);
@@ -672,8 +752,12 @@ export default function Whiteboard() {
       setDraft(null);
       if (!dr) return;
       if (dr.type === "arrow" || dr.type === "line") {
-        if (Math.hypot(dr.points[2], dr.points[3]) < 12) return;
-        const nid = createEl({ ...dr, z: nextZ() });
+        setHoverId(null);
+        if (Math.hypot(dr.points[2], dr.points[3]) < 12 && !(dr.a && dr.b && dr.a !== dr.b)) return;
+        const clean = { ...dr };
+        if (!clean.b) delete clean.b;
+        if (clean.a === clean.b) { delete clean.a; delete clean.b; }
+        const nid = createEl({ ...clean, z: nextZ() });
         setSelected(nid); setTool("select");
         return;
       }
@@ -773,8 +857,10 @@ export default function Whiteboard() {
     );
   }
 
-  const sorted = Object.entries(elements).sort((a, b) => (a[1].z || 0) - (b[1].z || 0));
-  const selEl = selected ? elements[selected] : null;
+  const vis = {};
+  for (const [k, el] of Object.entries(elements)) vis[k] = resolveConn(el, elements);
+  const sorted = Object.entries(vis).sort((a, b) => (a[1].z || 0) - (b[1].z || 0));
+  const selEl = selected ? vis[selected] : null;
   const selB = selEl ? bounds(selEl) : null;
   const handleSize = 16 / view.z;
   const canUndo = hist.current.undo.length > 0, canRedo = hist.current.redo.length > 0;
@@ -855,9 +941,13 @@ export default function Whiteboard() {
               <polygon points={draft.pts.join(" ").replace(/(\S+) (\S+)/g, "$1,$2")} fill={ACCENT + "22"} stroke={ACCENT} strokeWidth={1.5 / view.z} strokeDasharray={`${6 / view.z} ${4 / view.z}`} />
             </svg>
           )}
-          {draft && draft.type !== "lasso" && <ElementView id="__draft" el={draft} editing={false} onCommit={() => {}} />}
+          {draft && draft.type === "marquee" && (
+            <div style={{ position: "absolute", left: draft.x, top: draft.y, width: draft.w, height: draft.h, border: `${1.5 / view.z}px dashed ${ACCENT}`, background: ACCENT + "14", pointerEvents: "none" }} />
+          )}
+          {draft && draft.type !== "lasso" && draft.type !== "marquee" && <ElementView id="__draft" el={resolveConn(draft, elements)} editing={false} onCommit={() => {}} />}
+          {hoverId && vis[hoverId] && (() => { const b = bounds(vis[hoverId]); return <div style={{ position: "absolute", left: b.x - 5, top: b.y - 5, width: b.w + 10, height: b.h + 10, border: `${2.5 / view.z}px solid #00f5d4`, borderRadius: 8, pointerEvents: "none", boxSizing: "border-box" }} />; })()}
           {multi.map(id => {
-            const el = elements[id];
+            const el = vis[id];
             if (!el) return null;
             const b = bounds(el);
             return <div key={"m" + id} style={{ position: "absolute", left: b.x - 3, top: b.y - 3, width: b.w + 6, height: b.h + 6, border: `${1.5 / view.z}px solid ${ACCENT}`, background: ACCENT + "14", pointerEvents: "none", boxSizing: "border-box", borderRadius: 4 }} />;
@@ -995,6 +1085,9 @@ export default function Whiteboard() {
             <>
               <div style={{ width: 1, height: 26, background: "#2a2a44", margin: "0 4px", flexShrink: 0 }} />
               <span style={{ fontSize: 12, color: "#aaa", whiteSpace: "nowrap" }}>{multi.length} élément{multi.length > 1 ? "s" : ""}</span>
+              {[["left", "⇤", "Aligner à gauche"], ["cx", "↔", "Centrer horizontalement"], ["right", "⇥", "Aligner à droite"], ["top", "⤒", "Aligner en haut"], ["cy", "↕", "Centrer verticalement"], ["bottom", "⤓", "Aligner en bas"], ["dx", "⇹", "Répartir horizontalement"], ["dy", "⇳", "Répartir verticalement"]].map(([k, ic, t]) => (
+                <button key={k} style={small({ fontSize: 13 })} title={t} onClick={() => alignMulti(k)}>{ic}</button>
+              ))}
               <button style={small()} title="Dupliquer" onClick={duplicateMulti}>⧉</button>
               <button style={small()} title="Supprimer (Suppr)" onClick={removeMulti}>🗑</button>
             </>
@@ -1005,6 +1098,15 @@ export default function Whiteboard() {
               <button style={small({ fontSize: 12 })} title="Texte plus petit" onClick={() => patchSelected({ fs: clamp(Math.round(selEl.fs * 0.85), 8, 120) })}>A−</button>
               <button style={small()} title="Texte plus grand" onClick={() => patchSelected({ fs: clamp(Math.round(selEl.fs * 1.18), 8, 120) })}>A+</button>
             </>
+          )}
+          {selEl && selEl.type === "arrow" && (
+            <>
+              <button style={small({ fontSize: 13, ...(selEl.style === "elbow" ? { border: "1px solid " + ACCENT } : {}) })} title="Connecteur coudé / droit" onClick={() => patchSelected({ style: selEl.style === "elbow" ? "straight" : "elbow" })}>⤷</button>
+              <button style={small({ fontSize: 13, ...(selEl.ends === "both" ? { border: "1px solid " + ACCENT } : {}) })} title="Flèche à double sens" onClick={() => patchSelected({ ends: selEl.ends === "both" ? "end" : "both" })}>⇄</button>
+            </>
+          )}
+          {selEl && (selEl.a || selEl.b) && (
+            <button style={small({ fontSize: 12 })} title="Détacher des formes" onClick={() => { const r = vis[selected]; patchSelected({ x: r.x, y: r.y, points: r.points, a: undefined, b: undefined }); }}>⛓</button>
           )}
           {selEl && LINE_TYPES.includes(selEl.type) && (
             <>
