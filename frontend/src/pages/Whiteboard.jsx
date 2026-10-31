@@ -5,6 +5,7 @@ import { addLocalSession, getLocalSessions } from "../localHistory";
 import { useDocumentMeta } from "../useDocumentMeta";
 import { ElementView, BOX_TYPES, TEXT_BOX_TYPES, LINE_TYPES, bounds, resolveConn } from "../whiteboard/shapes";
 import { SHAPE_LIB, SHAPE_BY_ID, SHAPE_CATEGORIES, ShapeThumb } from "../whiteboard/shapeLib";
+import { SendToBacklog } from "../backlog/Backlog";
 import TemplatePicker from "../whiteboard/TemplatePicker";
 
 const ACCENT = "#4cc9f0";
@@ -77,6 +78,7 @@ export default function Whiteboard() {
   const [picks, setPicks] = useState({ lib: "rounded", pen: "pencil", shape: "rect", conn: "arrow", chart: "bar", emoji: "👍" });
   const [picker, setPicker] = useState(false);
   const [shapeQ, setShapeQ] = useState("");
+  const [backlogDrafts, setBacklogDrafts] = useState(null);
   const [hoverId, setHoverId] = useState(null);
   const [multi, setMulti] = useState([]);                    // sélection multiple (lasso)
   const [penSize, setPenSize] = useState(1);                 // index dans PEN_SIZES / HL_SIZES
@@ -814,6 +816,17 @@ export default function Whiteboard() {
     if (group) setPicks(p => ({ ...p, [group]: value }));
   };
 
+  const openBacklog = () => {
+    const els = elementsRef.current;
+    let ids = multiRef.current.length ? multiRef.current : (selectedRef.current ? [selectedRef.current] : Object.keys(els));
+    const notes = ids.map(i => els[i]).filter(e => e && e.type === "sticky" && e.text && e.text.trim())
+      .sort((a, b) => a.y - b.y || a.x - b.x);
+    setBacklogDrafts(notes.map(n => {
+      const [first, ...rest] = n.text.trim().split("\n");
+      return { title: first.slice(0, 200), description: rest.join("\n").trim() };
+    }));
+  };
+
   const copy = () => {
     navigator.clipboard.writeText(window.location.href);
     setCopied(true);
@@ -907,6 +920,10 @@ export default function Whiteboard() {
           <button onClick={clearAll} title="Tout effacer"
             style={{ padding: "6px 10px", background: "#14142a", border: "1px solid #2a2a44", borderRadius: 8, color: "#ff6b6b", fontSize: 12.5, cursor: "pointer" }}>
             Tout effacer
+          </button>
+          <button onClick={openBacklog} title="Envoyer les post-it (sélection, ou tous) vers le backlog de l'équipe"
+            style={{ padding: "6px 12px", background: "#14142a", border: "1px solid #2a2a44", borderRadius: 8, color: "#aaa", fontSize: 12.5, cursor: "pointer", fontWeight: 600 }}>
+            📤 Backlog
           </button>
           <button onClick={copy}
             style={{ padding: "6px 12px", background: copied ? "#00f5d4" : "#14142a", border: "1px solid #2a2a44", borderRadius: 8, color: copied ? "#0d0d1a" : "#aaa", fontSize: 12.5, cursor: "pointer", fontWeight: 600 }}>
@@ -1139,6 +1156,7 @@ export default function Whiteboard() {
         )}
       </div>
 
+      {backlogDrafts && <SendToBacklog drafts={backlogDrafts} source="whiteboard" sourceRef={id} onClose={() => setBacklogDrafts(null)} />}
       {picker && <TemplatePicker onPick={insertTemplate} onClose={() => setPicker(false)} />}
 
       {modal && (

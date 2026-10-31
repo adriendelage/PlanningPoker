@@ -3,12 +3,14 @@ import { useNavigate } from "react-router-dom";
 import socket from "../socket";
 import { addLocalSession } from "../localHistory";
 import { useDocumentMeta } from "../useDocumentMeta";
+import { ImportFromBacklog } from "../backlog/Backlog";
 
 export default function Home(){
   useDocumentMeta("Planning Poker", "Estimez vos user stories en équipe, en temps réel, gratuitement et sans compte — un lien suffit.");
   const [sessionName,setSessionName]=useState("");
   const [hostName,setHostName]=useState("");
   const [tasks,setTasks]=useState([""]);
+  const [showImport,setShowImport]=useState(false);
   const nav=useNavigate();
 
   const create=()=>{
@@ -84,6 +86,13 @@ export default function Home(){
               )}
             </div>
           ))}
+
+          <button onClick={()=>setShowImport(true)}
+            style={{width:"100%",padding:"12px",background:"transparent",color:"#00f5d4",border:"1px dashed #00f5d455",borderRadius:10,cursor:"pointer",fontSize:15,marginBottom:10,marginTop:4}}>
+            📥 Importer depuis le backlog de l'équipe
+          </button>
+          {showImport && <ImportFromBacklog onClose={()=>setShowImport(false)}
+            onPick={titles=>setTasks(ts=>[...ts.filter(t=>t.trim()),...titles])}/>}
 
           <button onClick={()=>setTasks([...tasks,""])}
             style={{width:"100%",padding:"12px",background:"transparent",color:"#555",border:"1px dashed #333",borderRadius:10,cursor:"pointer",fontSize:15,marginBottom:20,marginTop:4}}>

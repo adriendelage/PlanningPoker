@@ -6,8 +6,11 @@ export const itemsApi = {
   listSprints: (orgSlug) => authRequest(`/api/orgs/${orgSlug}/sprints`),
   createSprint: (orgSlug, payload) => authRequest(`/api/orgs/${orgSlug}/sprints`, { method: "POST", body: payload }),
 
-  listItems: (orgSlug, sprintFilter) => {
-    const qs = sprintFilter ? `?sprint=${encodeURIComponent(sprintFilter)}` : "";
+  listItems: (orgSlug, sprintFilter, extra = {}) => {
+    const q = new URLSearchParams();
+    if (sprintFilter) q.set("sprint", sprintFilter);
+    for (const [k, v] of Object.entries(extra)) if (v) q.set(k, v === true ? "1" : v);
+    const qs = q.toString() ? `?${q}` : "";
     return authRequest(`/api/orgs/${orgSlug}/items${qs}`);
   },
   createItem: (orgSlug, payload) => authRequest(`/api/orgs/${orgSlug}/items`, { method: "POST", body: payload }),

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { authApi, setToken } from "../auth";
 
 export default function Login() {
@@ -8,6 +8,8 @@ export default function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const nav = useNavigate();
+  const [qs] = useSearchParams();
+  const next = qs.get("next");
 
   const submit = async (e) => {
     e.preventDefault();
@@ -17,7 +19,7 @@ export default function Login() {
     try {
       const data = await authApi.login({ email, password });
       setToken(data.token);
-      nav("/app");
+      nav(next && next.startsWith("/") && !next.startsWith("//") ? next : "/app");
     } catch (err) {
       setError(err.message || "Erreur de connexion.");
     } finally {

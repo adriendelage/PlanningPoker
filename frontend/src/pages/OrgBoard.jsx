@@ -22,7 +22,10 @@ function ItemCard({ item, onMove, onDelete, colIndex, orgSlug }) {
         <span style={{ flex: 1 }}>{item.title}</span>
         <span style={{ fontSize: 11.5, color: "#00f5d499", whiteSpace: "nowrap" }}>Détails ›</span>
       </a>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#777" }}>
+      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, fontSize: 12, color: "#777" }}>
+        {item.kind === "retro_action" && <span style={{ color: "#f15bb5", border: "1px solid #f15bb544", borderRadius: 999, padding: "1px 8px" }}>✅ action de rétro</span>}
+        {item.kind !== "retro_action" && item.source && <span title={`Importé depuis ${item.source}`}>{{ poker: "🃏", whiteboard: "🧠", speedboat: "🚤", retro: "🔄" }[item.source] || ""}</span>}
+        {item.due_date && <span style={{ color: String(item.due_date).slice(0, 10) < new Date().toISOString().slice(0, 10) && item.status !== "done" ? "#ff6b6b" : "#777" }}>📅 {String(item.due_date).slice(0, 10)}</span>}
         {item.assignee && <span>👤 {item.assignee}</span>}
         {item.story_points != null && (
           <span style={{ marginLeft: "auto", color: ACCENT, fontWeight: 700 }}>{item.story_points} pts</span>

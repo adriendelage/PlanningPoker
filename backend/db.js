@@ -270,6 +270,12 @@ async function init() {
       updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    -- Rapprochement des outils en mode lien (poker, rétros, tableau blanc) :
+    -- un item sait d'où il vient, et une action de rétro est un item de kind 'retro_action'.
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'task';
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS source TEXT;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS source_ref TEXT;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS due_date DATE;
     CREATE INDEX IF NOT EXISTS idx_items_org ON items (org_id);
     CREATE INDEX IF NOT EXISTS idx_sprints_org ON sprints (org_id);
 
@@ -1070,10 +1076,13 @@ async function sprintCreate(orgId, { name, goal, startDate, endDate }) {
   return rows[0];
 }
 
-async function itemsList(orgId, sprintId) {
+async function itemsList(orgId, sprintId, opts = {}) {
   if (!enabled()) return [];
   const params = [orgId];
   let where = "org_id = $1";
+  if (opts.kind) { params.push(opts.kind); where += ` AND kind = $${params.length}`; }
+  if (opts.open) where += " AND status <> 'done'";
+  if (opts.unestimated) where += " AND story_points IS NULL AND kind = 'task'";
   if (sprintId === "backlog") {
     where += " AND sprint_id IS NULL";
   } else if (sprintId) {
@@ -1087,15 +1096,16 @@ async function itemsList(orgId, sprintId) {
   return rows;
 }
 
-async function itemCreate(orgId, { title, description, status, assignee, storyPoints, sprintId }, createdBy) {
+async function itemCreate(orgId, { title, description, status, assignee, storyPoints, sprintId, kind, source, sourceRef, dueDate }, createdBy) {
   if (!enabled()) return null;
   const { rows } = await pool.query(
-    `INSERT INTO items (org_id, title, description, status, assignee, story_points, sprint_id, position, created_by)
+    `INSERT INTO items (org_id, title, description, status, assignee, story_points, sprint_id, position, created_by, kind, source, source_ref, due_date)
      VALUES ($1, $2, $3, $4, $5, $6, $7,
              (SELECT COALESCE(MAX(position), -1) + 1 FROM items WHERE org_id = $1 AND status = $4),
-             $8)
+             $8, $9, $10, $11, $12)
      RETURNING *`,
-    [orgId, title, description || "", status || "todo", assignee || null, storyPoints ?? null, sprintId || null, createdBy]
+    [orgId, title, description || "", status || "todo", assignee || null, storyPoints ?? null, sprintId || null, createdBy,
+     kind || "task", source || null, sourceRef || null, dueDate || null]
   );
   return rows[0];
 }
@@ -1106,7 +1116,7 @@ async function itemCreate(orgId, { title, description, status, assignee, storyPo
 // AUTRE organisation (défense en profondeur contre les IDOR).
 async function itemUpdate(itemId, orgId, fields) {
   if (!enabled()) return null;
-  const allowed = ["title", "description", "status", "assignee", "story_points", "sprint_id", "position"];
+  const allowed = ["title", "description", "status", "assignee", "story_points", "sprint_id", "position", "due_date", "kind"];
   const sets = [], params = [itemId, orgId];
   for (const [key, value] of Object.entries(fields)) {
     if (!allowed.includes(key)) continue;

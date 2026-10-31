@@ -1,6 +1,7 @@
 import { useParams, useSearchParams } from "react-router-dom";
 import { useEffect, useState, useRef } from "react";
 import socket from "../socket";
+import { SendToBacklog } from "../backlog/Backlog";
 
 const cards=[0,1,3,5,8,13,21,"?"];
 
@@ -122,6 +123,8 @@ export default function Poker(){
   const isHost=search.get("host")==="true";
 
   const [state,setState]=useState(null);
+
+  const [showBacklog,setShowBacklog]=useState(false);
   const [selected,setSelected]=useState(null);
   const prevRevealed=useRef(false);
 
@@ -184,6 +187,17 @@ export default function Poker(){
           </div>
         )}
 
+        {history.some(h=>h.median!=null) && (
+          <button onClick={()=>setShowBacklog(true)}
+            style={{padding:"12px 28px",background:"#1a1a2e",border:"1px solid #00f5d4",borderRadius:8,color:"#00f5d4",fontWeight:"bold",fontSize:15,cursor:"pointer"}}>
+            📤 Envoyer les estimations vers le backlog
+          </button>
+        )}
+        {showBacklog && (
+          <SendToBacklog mode="estimates" source="poker" sourceRef={id} heading="📤 Estimations → backlog"
+            drafts={history.filter(h=>h.median!=null).map(h=>({title:h.task,storyPoints:Math.round(Number(h.median))}))}
+            onClose={()=>setShowBacklog(false)}/>
+        )}
         <button onClick={()=>window.location.href="/"}
           style={{marginTop:8,padding:"12px 28px",background:"#00f5d4",border:"none",borderRadius:8,fontWeight:"bold",fontSize:15,cursor:"pointer"}}>
           ← Nouvelle session

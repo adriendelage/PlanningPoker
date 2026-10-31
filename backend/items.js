@@ -93,9 +93,17 @@ router.get("/sprints/:sprintId/burndown", async (req, res) => {
 
 // ── Items ────────────────────────────────────────────────────────────────────
 
+const VALID_KINDS = ["task", "retro_action"];
+const VALID_SOURCES = ["poker", "retro", "speedboat", "whiteboard", "manual"];
+const cleanDate = (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+
 router.get("/items", async (req, res) => {
   try {
-    const items = await db.itemsList(req.org.id, req.query.sprint);
+    const items = await db.itemsList(req.org.id, req.query.sprint, {
+      kind: VALID_KINDS.includes(req.query.kind) ? req.query.kind : null,
+      open: req.query.open === "1",
+      unestimated: req.query.unestimated === "1",
+    });
     res.json(items);
   } catch (e) {
     console.error("Erreur GET /items:", e.message);
@@ -119,9 +127,13 @@ router.post("/items", async (req, res) => {
       assignee: req.body?.assignee ? String(req.body.assignee).trim().slice(0, 60) : null,
       storyPoints,
       sprintId: req.body?.sprintId || null,
+      kind: VALID_KINDS.includes(req.body?.kind) ? req.body.kind : "task",
+      source: VALID_SOURCES.includes(req.body?.source) ? req.body.source : null,
+      sourceRef: req.body?.sourceRef ? String(req.body.sourceRef).slice(0, 40) : null,
+      dueDate: cleanDate(req.body?.dueDate),
     }, req.authUser.sub);
 
-    await db.itemActivityLog(item.id, req.authUser.sub, "created", { title });
+    await db.itemActivityLog(item.id, req.authUser.sub, "created", { title, source: item.source });
     res.status(201).json(item);
   } catch (e) {
     console.error("Erreur POST /items:", e.message);
@@ -148,6 +160,8 @@ router.patch("/items/:itemId", async (req, res) => {
         : null;
     }
     if (req.body?.sprintId !== undefined) fields.sprint_id = req.body.sprintId || null;
+    if (req.body?.dueDate !== undefined) fields.due_date = cleanDate(req.body.dueDate);
+    if (req.body?.kind != null && VALID_KINDS.includes(req.body.kind)) fields.kind = req.body.kind;
     if (req.body?.position != null) fields.position = parseInt(req.body.position) || 0;
 
     const item = await db.itemUpdate(req.params.itemId, req.org.id, fields);

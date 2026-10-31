@@ -1,6 +1,7 @@
 import { useParams, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import socket from "../socket";
+import { RetroActionsPanel } from "../backlog/Backlog";
 
 const COL_COLORS = ["#00f5d4", "#f15bb5", "#fee440", "#9b5de5", "#00bbf9"];
 
@@ -155,6 +156,7 @@ export default function Retro() {
   const [state, setState] = useState(null);
   const [notFound, setNotFound] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showActions, setShowActions] = useState(false);
 
   useEffect(() => {
     socket.emit("retro:state", { id, isHost });
@@ -217,12 +219,20 @@ export default function Retro() {
           }}>
             {phase.label}
           </span>
-          <span style={{ marginLeft: "auto", fontSize: 13, color: "#666" }}>
+          <button onClick={() => setShowActions(true)}
+            style={{ marginLeft: "auto", padding: "6px 12px", background: "#14142a", border: "1px solid #f15bb566", borderRadius: 8, color: "#f15bb5", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+            ✅ Actions
+          </button>
+          <span style={{ fontSize: 13, color: "#666" }}>
             👥 {state.participants.map(p => p.name).join(", ")}
           </span>
         </header>
 
         <p style={{ margin: "0 0 18px", color: "#777", fontSize: 14 }}>{phase.hint}</p>
+        {showActions && (
+          <RetroActionsPanel source="retro" sourceRef={id} onClose={() => setShowActions(false)}
+            seeds={[...state.notes].filter(n => n.text).sort((a, b) => b.votes - a.votes).slice(0, 10).map(n => ({ title: n.text.slice(0, 200), votes: n.votes }))} />
+        )}
 
         {/* ── Bandeau vote : compteur de votes restants ── */}
         {state.phase === "voting" && (

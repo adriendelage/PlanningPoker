@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import socket from "../socket";
 import { addLocalSession, getLocalSessions } from "../localHistory";
 import { useDocumentMeta } from "../useDocumentMeta";
+import { RetroActionsPanel } from "../backlog/Backlog";
 
 const ACCENT = "#00bbf9";
 const W = 1000, H = 600;                 // espace de coordonnées de la scène
@@ -478,6 +479,7 @@ export default function Speedboat() {
   }, [remove]);
 
   const [exporting, setExporting] = useState(false);
+  const [showActions, setShowActions] = useState(false);
   const exportImage = async () => {
     const svg = sceneRef.current && sceneRef.current.querySelector("svg");
     if (!svg) return;
@@ -538,6 +540,10 @@ export default function Speedboat() {
   return (
     <div style={{ minHeight: "100vh", background: "#0d0d1a", color: "#fff", padding: "18px 16px 40px", userSelect: "none", WebkitUserSelect: "none" }}>
       <div style={{ maxWidth: 1500, margin: "0 auto" }}>
+        {showActions && (
+          <RetroActionsPanel source="speedboat" sourceRef={id} onClose={() => setShowActions(false)}
+            seeds={Object.values(notes).filter(n => n.text && n.text.trim()).slice(0, 12).map(n => ({ title: n.text.trim().slice(0, 200) }))} />
+        )}
 
         <header style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: 14 }}>
           <a href="/" style={{ color: "#666", fontSize: 14, textDecoration: "none" }}>← Outils</a>
@@ -546,6 +552,10 @@ export default function Speedboat() {
             <button onClick={rename} title="Changer ton nom affiché"
               style={{ padding: "7px 12px", background: "#14142a", border: "1px solid #2a2a44", borderRadius: 8, color: "#aaa", fontSize: 13, cursor: "pointer" }}>
               👤 {myName || "Ton nom"}
+            </button>
+            <button onClick={() => setShowActions(true)} title="Actions de rétro persistantes (backlog de l'équipe)"
+              style={{ padding: "7px 12px", background: "#14142a", border: `1px solid ${ACCENT}66`, borderRadius: 8, color: ACCENT, fontSize: 13, cursor: "pointer", fontWeight: 600 }}>
+              ✅ Actions
             </button>
             <button onClick={exportImage} disabled={exporting} title="Télécharger le speedboat en image PNG"
               style={{ padding: "7px 12px", background: "#14142a", border: "1px solid #2a2a44", borderRadius: 8, color: "#ddd", fontSize: 13, cursor: exporting ? "default" : "pointer", fontWeight: 600 }}>
