@@ -206,7 +206,10 @@ function Table({ el }) {
 }
 
 // ─── Rendu d'un élément ─────────────────────────────────────────────────────
-export function ElementView({ el, id, editing, onCommit }) {
+const tilt = (id) => (id && id.length > 3 ? ((id.charCodeAt(0) + id.charCodeAt(3)) % 5) - 2 : 0);   // -2° à +2°, stable
+const isDarkNote = (c) => ["#2b2d42", "#9b5de5"].includes(String(c).toLowerCase());
+
+export function ElementView({ el, id, editing, onCommit, onDelete, selected }) {
   const common = { position: "absolute", left: el.x, top: el.y };
 
   if (LINE_TYPES.includes(el.type)) {
@@ -320,17 +323,42 @@ export function ElementView({ el, id, editing, onCommit }) {
     fontSize: el.fs, lineHeight: 1.3, overflow: "hidden", wordBreak: "break-word", whiteSpace: "pre-wrap",
     userSelect: "none", fontFamily: "system-ui, sans-serif",
   };
-  if (isSticky) Object.assign(style, { background: el.color, color: "#1a1a2e", padding: 12, borderRadius: 4, boxShadow: "0 6px 14px rgba(0,0,0,.45)" });
+  if (isSticky) Object.assign(style, {
+    background: el.color, color: isDarkNote(el.color) ? "#fff" : "#1a1a2e", borderRadius: 4, overflow: "visible",
+    padding: "9px 22px 20px 10px", boxShadow: "0 6px 12px rgba(0,0,0,.5)", transform: editing ? undefined : `rotate(${tilt(id)}deg)`,
+  });
   else if (isText) Object.assign(style, { color: el.color, padding: 4 });
   else Object.assign(style, {
     border: `3px solid ${el.color}`, background: el.color + "22", color: "#fff", padding: 8,
     borderRadius: el.type === "ellipse" ? "50%" : 8, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center",
   });
 
+  if (isSticky) {
+    const small = el.w < 90;
+    return (
+      <div data-el={id} style={style}>
+        <div style={{ width: "100%", height: "100%", overflow: "hidden", wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
+          {editing ? <TextEditor initial={el.text} align="left" onDone={v => onCommit(id, v)} /> : el.text}
+        </div>
+        {/* nom de l'auteur : petit, discret, sur le bord bas */}
+        {el.author && el.w >= 90 && el.h >= 60 && (
+          <div style={{ position: "absolute", left: 8, bottom: 3, right: 26, fontSize: 10, lineHeight: "13px", opacity: 0.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", pointerEvents: "none" }}>{el.author}</div>
+        )}
+        {/* petite poubelle, coin haut droit */}
+        {onDelete && (
+          <button data-ui title="Supprimer ce post-it" onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onDelete(id); }}
+            style={{ position: "absolute", top: 2, right: 2, width: small ? 14 : 20, height: small ? 14 : 20, padding: 0, border: "none", borderRadius: 4, background: "rgba(0,0,0,.18)", color: "inherit", fontSize: small ? 9 : 12, lineHeight: small ? "14px" : "20px", cursor: "pointer", opacity: selected ? 1 : 0.55 }}>🗑</button>
+        )}
+        {/* repère visuel de redimensionnement, coin bas droit (la poignée réelle apparaît à la sélection) */}
+        <div style={{ position: "absolute", right: 0, bottom: 0, width: small ? 14 : 18, height: small ? 14 : 18, background: "linear-gradient(135deg, transparent 50%, rgba(0,0,0,.35) 50%)", borderBottomRightRadius: 4, opacity: 0.6, pointerEvents: "none" }} />
+      </div>
+    );
+  }
+
   return (
     <div data-el={id} style={style}>
       {editing
-        ? <TextEditor initial={el.text} align={isSticky || isText ? "left" : "center"} onDone={v => onCommit(id, v)} />
+        ? <TextEditor initial={el.text} align={isText ? "left" : "center"} onDone={v => onCommit(id, v)} />
         : el.text}
     </div>
   );

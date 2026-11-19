@@ -10,20 +10,23 @@ import SpeedboatExport, { collectSpeedboat } from "../whiteboard/SpeedboatExport
 import TemplatePicker from "../whiteboard/TemplatePicker";
 
 const ACCENT = "#4cc9f0";
-const COLORS = ["#fee440", "#ff9f1c", "#ff6b6b", "#f15bb5", "#c8a2ff", "#4cc9f0", "#00f5d4", "#8ac926", "#ffffff", "#9aa7b8"];
+const COLORS = [
+  "#fee440", "#ffd6a5", "#ff9f1c", "#ff6b6b", "#f15bb5", "#ffb3d9", "#c8a2ff", "#9b5de5",
+  "#4cc9f0", "#00bbf9", "#00f5d4", "#8ac926", "#caffbf", "#ffffff", "#b8c0cc", "#2b2d42",
+];
 const MIN_Z = 0.1, MAX_Z = 4;
 
 const SHAPES = [
-  { id: "rect", icon: "▭", label: "Rectangle (R)" },
-  { id: "ellipse", icon: "◯", label: "Ellipse (O)" },
-  { id: "diamond", icon: "◇", label: "Losange (D)" },
+  { id: "rect", icon: "▭", label: "Rectangle" },
+  { id: "ellipse", icon: "◯", label: "Ellipse" },
+  { id: "diamond", icon: "◇", label: "Losange" },
   { id: "triangle", icon: "△", label: "Triangle" },
   { id: "hexagon", icon: "⬡", label: "Hexagone" },
   { id: "star", icon: "☆", label: "Étoile" },
 ];
 const CONNECTORS = [
-  { id: "arrow", icon: "➜", label: "Flèche (A)" },
-  { id: "line", icon: "╱", label: "Ligne (L)" },
+  { id: "arrow", icon: "➜", label: "Flèche" },
+  { id: "line", icon: "╱", label: "Ligne" },
   { id: "elbow", icon: "⤷", label: "Connecteur coudé" },
   { id: "darrow", icon: "⇄", label: "Flèche à double sens" },
 ];
@@ -36,7 +39,6 @@ const CHARTS = [
 ];
 const EMOJIS = ["👍", "👎", "❤️", "⭐", "🔥", "💡", "✅", "❌", "❓", "❗", "🎯", "🚀", "🐞", "🔒", "⏰", "🏆", "😀", "😐", "😢", "😡", "🎉", "🙏", "👀", "🔵"];
 
-const KEYS = { v: "select", h: "hand", s: "sticky", t: "text", r: "rect", o: "ellipse", d: "diamond", a: "arrow", l: "line", p: "pencil", i: "highlighter", q: "lasso", f: "frame", b: "table", g: "chart", e: "eraser", x: "eraserInk" };
 const PEN_SIZES = [2, 4, 8];
 const HL_SIZES = [14, 22, 34];
 const PEN_TOOLS = ["pencil", "highlighter", "eraser", "eraserInk", "lasso"];
@@ -433,8 +435,6 @@ export default function Whiteboard() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") { e.preventDefault(); duplicate(); return; }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === "Escape") { setSelected(null); setMulti([]); setTool("select"); setMenu(null); setPicker(false); setModal(null); return; }
-      const k = KEYS[e.key.toLowerCase()];
-      if (k) { setTool(k); setMenu(null); }
     };
     const up = (e) => { if (e.code === "Space") spaceRef.current = false; };
     window.addEventListener("keydown", down);
@@ -959,7 +959,7 @@ export default function Whiteboard() {
       >
         <div style={{ position: "absolute", left: 0, top: 0, transformOrigin: "0 0", transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, pointerEvents: panning ? "none" : "auto" }}>
           {sorted.map(([elId, el]) => (
-            <ElementView key={elId} id={elId} el={el} editing={editing === elId} onCommit={commitText} />
+            <ElementView key={elId} id={elId} el={el} editing={editing === elId} onCommit={commitText} onDelete={removeElement} selected={selected === elId} />
           ))}
           {draft && draft.type === "lasso" && (
             <svg width="1" height="1" style={{ position: "absolute", left: 0, top: 0, overflow: "visible", pointerEvents: "none" }}>
@@ -1010,18 +1010,18 @@ export default function Whiteboard() {
           position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", maxHeight: "calc(100% - 20px)", overflowY: "auto", overflowX: "visible",
           display: "flex", flexDirection: "column", gap: 5, padding: 7, background: "#14142aee", border: "1px solid #2a2a44", borderRadius: 14, zIndex: 10,
         }}>
-          <button title="Sélection (V)" onClick={() => chooseTool("select")} style={btn(tool === "select")}>↖</button>
+          <button title="Sélection" onClick={() => chooseTool("select")} style={btn(tool === "select")}>↖</button>
           <button title="Déplacer la vue (H ou Espace)" onClick={() => chooseTool("hand")} style={btn(tool === "hand")}>✋</button>
-          <button title="Post-it (S)" onClick={() => chooseTool("sticky")} style={btn(tool === "sticky")}>🗒️</button>
-          <button title="Texte (T)" onClick={() => chooseTool("text")} style={btn(tool === "text")}>T</button>
+          <button title="Post-it" onClick={() => chooseTool("sticky")} style={btn(tool === "sticky")}>🗒️</button>
+          <button title="Texte" onClick={() => chooseTool("text")} style={btn(tool === "text")}>T</button>
           {groupBtn("shapes", shapeIcon, "Formes", isShape)}
           {groupBtn("conn", connIcon, "Connecteurs", isConn)}
           {groupBtn("pen", picks.pen === "highlighter" ? "🖍️" : picks.pen === "lasso" ? "⭕" : picks.pen === "eraserInk" ? "🩹" : "✏️", "Crayon, surligneur, lasso…", PEN_TOOLS.includes(tool))}
-          <button title="Cadre (F) — regroupe et déplace ce qu'il contient" onClick={() => chooseTool("frame")} style={btn(tool === "frame")}>⬚</button>
-          <button title="Tableau (B)" onClick={() => chooseTool("table")} style={btn(tool === "table")}>▦</button>
+          <button title="Cadre — regroupe et déplace ce qu'il contient" onClick={() => chooseTool("frame")} style={btn(tool === "frame")}>⬚</button>
+          <button title="Tableau" onClick={() => chooseTool("table")} style={btn(tool === "table")}>▦</button>
           {groupBtn("charts", chartIcon, "Graphiques", tool === "chart")}
           {groupBtn("emoji", picks.emoji, "Émojis et tampons", tool === "emoji")}
-          <button title="Gomme (E)" onClick={() => chooseTool("eraser")} style={btn(tool === "eraser")}>🧽</button>
+          <button title="Gomme" onClick={() => chooseTool("eraser")} style={btn(tool === "eraser")}>🧽</button>
           <div style={{ height: 1, background: "#2a2a44", margin: "2px 0" }} />
           <button title="Annuler (Ctrl+Z)" disabled={!canUndo} onClick={undo} style={btn(false, !canUndo)}>↶</button>
           <button title="Rétablir (Ctrl+Maj+Z)" disabled={!canRedo} onClick={redo} style={btn(false, !canRedo)}>↷</button>
@@ -1059,11 +1059,11 @@ export default function Whiteboard() {
         )}
         {menu === "pen" && (
           <div data-ui style={{ ...flyoutStyle, top: "34%", width: 150 }}>
-            <button title="Crayon (P)" onClick={() => chooseTool("pencil", "pen", "pencil")} style={btn(tool === "pencil")}>✏️</button>
-            <button title="Surligneur (I)" onClick={() => chooseTool("highlighter", "pen", "highlighter")} style={btn(tool === "highlighter")}>🖍️</button>
-            <button title="Gomme de traits (E) — efface l'élément touché" onClick={() => chooseTool("eraser", "pen", "eraser")} style={btn(tool === "eraser")}>🧽</button>
-            <button title="Gomme de dessin (X) — n'efface que les traits au crayon / surligneur" onClick={() => chooseTool("eraserInk", "pen", "eraserInk")} style={btn(tool === "eraserInk")}>🩹</button>
-            <button title="Lasso (Q) — entoure pour sélectionner plusieurs éléments" onClick={() => chooseTool("lasso", "pen", "lasso")} style={btn(tool === "lasso")}>⭕</button>
+            <button title="Crayon" onClick={() => chooseTool("pencil", "pen", "pencil")} style={btn(tool === "pencil")}>✏️</button>
+            <button title="Surligneur" onClick={() => chooseTool("highlighter", "pen", "highlighter")} style={btn(tool === "highlighter")}>🖍️</button>
+            <button title="Gomme de traits — efface l'élément touché" onClick={() => chooseTool("eraser", "pen", "eraser")} style={btn(tool === "eraser")}>🧽</button>
+            <button title="Gomme de dessin — n'efface que les traits au crayon / surligneur" onClick={() => chooseTool("eraserInk", "pen", "eraserInk")} style={btn(tool === "eraserInk")}>🩹</button>
+            <button title="Lasso — entoure pour sélectionner plusieurs éléments" onClick={() => chooseTool("lasso", "pen", "lasso")} style={btn(tool === "lasso")}>⭕</button>
             <div style={{ width: "100%", height: 1, background: "#2a2a44" }} />
             {[0, 1, 2].map(i => (
               <button key={i} title={["Fin", "Moyen", "Épais"][i]} onClick={() => setPenSize(i)} style={btn(penSize === i)}>
@@ -1122,6 +1122,15 @@ export default function Whiteboard() {
             <>
               <button style={small({ fontSize: 12 })} title="Texte plus petit" onClick={() => patchSelected({ fs: clamp(Math.round(selEl.fs * 0.85), 8, 120) })}>A−</button>
               <button style={small()} title="Texte plus grand" onClick={() => patchSelected({ fs: clamp(Math.round(selEl.fs * 1.18), 8, 120) })}>A+</button>
+            </>
+          )}
+          {selEl && selEl.type === "sticky" && (
+            <>
+              <div style={{ width: 1, height: 26, background: "#2a2a44", margin: "0 4px", flexShrink: 0 }} />
+              {[["S", 120, 90, 14], ["M", 180, 160, 18], ["L", 260, 220, 24]].map(([l, w, h, fs]) => (
+                <button key={l} title={`Taille ${l}`} style={small({ fontSize: 12, fontWeight: 700, ...(selEl.w === w ? { border: "1px solid " + ACCENT } : {}) })}
+                  onClick={() => patchSelected({ w, h, fs })}>{l}</button>
+              ))}
             </>
           )}
           {selEl && selEl.type === "arrow" && (
