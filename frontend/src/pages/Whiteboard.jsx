@@ -6,6 +6,7 @@ import { useDocumentMeta } from "../useDocumentMeta";
 import { ElementView, BOX_TYPES, TEXT_BOX_TYPES, LINE_TYPES, bounds, resolveConn } from "../whiteboard/shapes";
 import { SHAPE_LIB, SHAPE_BY_ID, SHAPE_CATEGORIES, ShapeThumb } from "../whiteboard/shapeLib";
 import { SendToBacklog } from "../backlog/Backlog";
+import SpeedboatExport, { collectSpeedboat } from "../whiteboard/SpeedboatExport";
 import TemplatePicker from "../whiteboard/TemplatePicker";
 
 const ACCENT = "#4cc9f0";
@@ -79,6 +80,7 @@ export default function Whiteboard() {
   const [picker, setPicker] = useState(false);
   const [shapeQ, setShapeQ] = useState("");
   const [backlogDrafts, setBacklogDrafts] = useState(null);
+  const [sbExport, setSbExport] = useState(false);
   const [hoverId, setHoverId] = useState(null);
   const [multi, setMulti] = useState([]);                    // sélection multiple (lasso)
   const [penSize, setPenSize] = useState(1);                 // index dans PEN_SIZES / HL_SIZES
@@ -921,6 +923,12 @@ export default function Whiteboard() {
             style={{ padding: "6px 10px", background: "#14142a", border: "1px solid #2a2a44", borderRadius: 8, color: "#ff6b6b", fontSize: 12.5, cursor: "pointer" }}>
             Tout effacer
           </button>
+          {collectSpeedboat(elements).zones.size >= 2 && (
+            <button onClick={() => setSbExport(true)} title="Créer une session Speed Boat (nouveau lien) avec les post-it de ce tableau"
+              style={{ padding: "6px 12px", background: "#14142a", border: "1px solid #00bbf966", borderRadius: 8, color: "#00bbf9", fontSize: 12.5, cursor: "pointer", fontWeight: 600 }}>
+              🚤 Exporter en Speed Boat
+            </button>
+          )}
           <button onClick={openBacklog} title="Envoyer les post-it (sélection, ou tous) vers le backlog de l'équipe"
             style={{ padding: "6px 12px", background: "#14142a", border: "1px solid #2a2a44", borderRadius: 8, color: "#aaa", fontSize: 12.5, cursor: "pointer", fontWeight: 600 }}>
             📤 Backlog
@@ -1156,6 +1164,7 @@ export default function Whiteboard() {
         )}
       </div>
 
+      {sbExport && <SpeedboatExport elements={elements} boardName={name} myName={myName} onClose={() => setSbExport(false)} />}
       {backlogDrafts && <SendToBacklog drafts={backlogDrafts} source="whiteboard" sourceRef={id} onClose={() => setBacklogDrafts(null)} />}
       {picker && <TemplatePicker onPick={insertTemplate} onClose={() => setPicker(false)} />}
 

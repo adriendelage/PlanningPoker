@@ -518,6 +518,16 @@ export default function Speedboat() {
       </div>
     );
   }
+  // ?export=1 (lien venant du tableau blanc) : télécharge l'image dès que la scène est prête
+  useEffect(() => {
+    if (!loaded || new URLSearchParams(window.location.search).get("export") !== "1") return;
+    const t = setTimeout(() => {
+      window.history.replaceState(null, "", window.location.pathname);
+      exportImage();
+    }, 900);
+    return () => clearTimeout(t);
+  }, [loaded]); // eslint-disable-line
+
   if (!loaded) {
     return (
       <div style={{ minHeight: "100vh", background: "#0d0d1a", display: "flex", alignItems: "center", justifyContent: "center", color: "#555" }}>
