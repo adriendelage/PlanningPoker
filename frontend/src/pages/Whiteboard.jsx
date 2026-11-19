@@ -335,6 +335,74 @@ export default function Whiteboard() {
     });
     record(changes);
   };
+  // ─── Copier / coller (Ctrl+C, Ctrl+X, Ctrl+V) ───────────────────────────────
+  const clipRef = useRef({ items: [], text: "", n: 0 });
+  const copySel = () => {
+    const ids = multiRef.current.length ? multiRef.current : selectedRef.current ? [selectedRef.current] : [];
+    const all = elementsRef.current;
+    const set = new Set(ids.filter(i => all[i]));
+    if (!set.size) return null;
+    const items = [...set].map(id => {
+      const el = all[id];
+      const r = resolveConn(el, all);
+      return { id, el: { ...r, a: set.has(el.a) ? el.a : undefined, b: set.has(el.b) ? el.b : undefined } };
+    });
+    const text = items.map(i => i.el.text).filter(t => t && t.trim()).join("\n");
+    clipRef.current = { items, text: text || " ", n: 0 };
+    return clipRef.current.text;
+  };
+  const pasteInternal = () => {
+    const clip = clipRef.current;
+    if (!clip.items.length) return;
+    clip.n += 1;
+    const off = 24 * clip.n;
+    const map = {};
+    clip.items.forEach(i => { map[i.id] = rid(); });
+    const changes = [], nids = [];
+    for (const { id, el } of clip.items) {
+      const next = { ...el, x: Math.round(el.x + off), y: Math.round(el.y + off), z: el.type === "frame" ? backZ() : nextZ() };
+      if (el.a) next.a = map[el.a]; else delete next.a;
+      if (el.b) next.b = map[el.b]; else delete next.b;
+      putElement(map[id], next);
+      changes.push({ id: map[id], before: null, after: next });
+      nids.push(map[id]);
+    }
+    record(changes);
+    if (nids.length === 1) { setMulti([]); setSelected(nids[0]); } else { setSelected(null); setMulti(nids); }
+  };
+  const pasteText = (text) => {
+    const v = viewRef.current, box = boxRef.current;
+    const cx = box ? (box.clientWidth / 2 - v.x) / v.z : 0, cy = box ? (box.clientHeight / 2 - v.y) / v.z : 0;
+    const nid = createEl({ type: "sticky", x: Math.round(cx - 90), y: Math.round(cy - 80), w: 180, h: 160, text: text.trim().slice(0, 2000), color: colorRef.current, fs: 18, z: nextZ(), author: myNameRef.current });
+    setMulti([]); setSelected(nid);
+  };
+  const clipActions = useRef({});
+  clipActions.current = { copySel, pasteInternal, pasteText, removeMulti, removeElement };
+  useEffect(() => {
+    const typing = (t) => t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.tagName === "SELECT" || t.isContentEditable);
+    const onCopy = (e, cut) => {
+      if (typing(e.target)) return;
+      const A = clipActions.current;
+      const text = A.copySel();
+      if (text === null) return;
+      e.clipboardData.setData("text/plain", text);
+      e.preventDefault();
+      if (cut) { multiRef.current.length ? A.removeMulti() : A.removeElement(selectedRef.current); }
+    };
+    const onPaste = (e) => {
+      if (typing(e.target)) return;
+      const A = clipActions.current;
+      const text = e.clipboardData?.getData("text/plain") || "";
+      const clip = clipRef.current;
+      e.preventDefault();
+      if (clip.items.length && (!text || text === clip.text)) A.pasteInternal();
+      else if (text.trim()) A.pasteText(text);
+    };
+    const c = (e) => onCopy(e, false), x = (e) => onCopy(e, true);
+    document.addEventListener("copy", c); document.addEventListener("cut", x); document.addEventListener("paste", onPaste);
+    return () => { document.removeEventListener("copy", c); document.removeEventListener("cut", x); document.removeEventListener("paste", onPaste); };
+  }, []);
+
   const duplicateMulti = () => {
     const nids = [], changes = [];
     for (const id of multiRef.current) {
